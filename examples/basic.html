@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QuickAuth Web SDK — basic example</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 420px;
+        margin: 4rem auto;
+        padding: 0 1rem;
+        color: #111;
+      }
+      h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+      label { display: block; margin: 1rem 0 0.4rem; font-weight: 600; }
+      input, button {
+        width: 100%;
+        padding: 0.7rem 0.9rem;
+        font-size: 1rem;
+        border-radius: 8px;
+        border: 1px solid #d0d0d0;
+        box-sizing: border-box;
+      }
+      button {
+        background: #111;
+        color: white;
+        border: none;
+        cursor: pointer;
+        margin-top: 1rem;
+      }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      pre {
+        background: #f5f5f5;
+        padding: 0.8rem;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        overflow: auto;
+      }
+      .row { display: flex; gap: 0.5rem; align-items: center; }
+      .row input[type='checkbox'] { width: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>QuickAuth — phone OTP demo</h1>
+
+    <div class="row">
+      <input id="consent" type="checkbox" />
+      <label for="consent" style="margin: 0">
+        I agree to QuickAuth using device + attribution data (DPDP / GDPR)
+      </label>
+    </div>
+
+    <label for="phone">Phone (E.164)</label>
+    <input id="phone" type="tel" placeholder="+919876543210" />
+    <button id="send">Send OTP</button>
+
+    <label for="code">OTP code</label>
+    <input
+      id="code"
+      type="text"
+      inputmode="numeric"
+      autocomplete="one-time-code"
+      placeholder="123456"
+    />
+    <button id="verify" disabled>Verify</button>
+
+    <h2 style="margin-top: 2rem">Result</h2>
+    <pre id="out">awaiting input</pre>
+
+    <!--
+      The tsup IIFE bundle exposes the namespace as `QuickAuth` on `window`.
+      Replace the relative src with a CDN URL once the package is published.
+    -->
+    <script src="../dist/index.global.js"></script>
+    <script>
+      const out = document.getElementById('out')
+      const log = (msg) => {
+        out.textContent =
+          typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2)
+      }
+
+      QuickAuth.init({
+        apiBaseUrl: 'https://api.quickauth.in',
+        // Customer's backend exposes /api/quickauth-token, which calls
+        // POST https://api.quickauth.in/v1/sdk/session with X-Client-Id +
+        // X-Client-Secret and returns { sessionToken, expiresIn }.
+        onTokenExpiry: async () =>
+          (await fetch('/api/quickauth-token').then((r) => r.json()))
+            .sessionToken,
+      })
+
+      document.getElementById('consent').addEventListener('change', (e) => {
+        QuickAuth.consent.set(e.target.checked)
+      })
+
+      // Capture WhatsApp template attribution on page load.
+      QuickAuth.attribution.captureLaunch().then((r) => {
+        if (r.matched) console.log('[QuickAuth] matched campaign', r)
+      })
+
+      // Wire WebOTP autofill on the OTP input.
+      QuickAuth.auth.observeOTP({
+        input: '#code',
+        onCode: (code) => {
+          document.getElementById('code').value = code
+          document.getElementById('verify').disabled = false
+        },
+      })
+
+      let session = null
+
+      document.getElementById('send').addEventListener('click', async () => {
+        try {
+          session = await QuickAuth.auth.startOTP({
+            phone: document.getElementById('phone').value.trim(),
+            channel: 'auto',
+          })
+          document.getElementById('verify').disabled = false
+          log({ stage: 'sent', session })
+        } catch (err) {
+          log('Error: ' + (err && err.message ? err.message : err))
+        }
+      })
+
+      document.getElementById('verify').addEventListener('click', async () => {
+        if (!session) return
+        try {
+          const result = await QuickAuth.auth.verifyOTP({
+            sessionId: session.sessionId,
+            code: document.getElementById('code').value.trim(),
+          })
+          log({ stage: 'verified', result })
+          await QuickAuth.attribution.trackConversion({
+            event: 'login',
+            currency: 'INR',
+          })
+        } catch (err) {
+          log('Error: ' + (err && err.message ? err.message : err))
+        }
+      })
+    </script>
+  </body>
+</html>
