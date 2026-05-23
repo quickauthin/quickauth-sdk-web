@@ -104,12 +104,15 @@ QuickAuth.init({
 const session = await QuickAuth.auth.startOTP({ phone: '+919876543210' })
 
 // 2. Verify
-const { jwt } = await QuickAuth.auth.verifyOTP({
+const { verified, requestId } = await QuickAuth.auth.verifyOTP({
   sessionId: session.sessionId,
   code: '123456',
 })
 
-// 3. Send `jwt` to your backend to exchange for a full session.
+// 3. Forward `requestId` to your backend, which confirms with QuickAuth
+//    server-to-server (GET /v1/auth/status?requestId=...) and mints its
+//    own session JWT. QuickAuth is verification-only — your backend owns
+//    the session. See https://quickauth.in/docs/backend
 ```
 
 ---
@@ -157,7 +160,7 @@ queue, the device fingerprint cache, and any stored `qa_clid`.
 
 ```ts
 QuickAuth.auth.startOTP({ phone, channel })   // channel: 'sms' | 'whatsapp' | 'auto'
-QuickAuth.auth.verifyOTP({ sessionId, code }) // returns { jwt, expiresIn }
+QuickAuth.auth.verifyOTP({ sessionId, code }) // returns { verified, requestId, message }
 QuickAuth.auth.observeOTP({ onCode, input })  // WebOTP + autocomplete fallback
 QuickAuth.auth.startWhatsAppLogin({ businessNumber, returnUrl })
 ```

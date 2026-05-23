@@ -66,9 +66,9 @@ describe('QuickAuth.auth.startOTP / verifyOTP', () => {
     expect(headers['Idempotency-Key']).toBeTruthy()
   })
 
-  it('verifyOTP posts correct body and returns parsed JWT', async () => {
+  it('verifyOTP posts correct body and returns verified + requestId', async () => {
     const mock = makeMockFetch()
-    mock.reply({ jwt: 'jwt_token', expiresIn: 60 })
+    mock.reply({ verified: true, requestId: 'req_abc', message: 'Verified successfully' })
     initSdk({ fetch: mock.fn as unknown as typeof fetch })
 
     const result = await QuickAuth.auth.verifyOTP({
@@ -76,8 +76,9 @@ describe('QuickAuth.auth.startOTP / verifyOTP', () => {
       code: '123456',
     })
 
-    expect(result.jwt).toBe('jwt_token')
-    expect(result.expiresIn).toBe(60)
+    expect(result.verified).toBe(true)
+    expect(result.requestId).toBe('req_abc')
+    expect(result.message).toBe('Verified successfully')
     const [url, init] = mock.fn.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('https://api.test.local/v1/sdk/auth/verify')
     expect(JSON.parse(init.body as string)).toEqual({
