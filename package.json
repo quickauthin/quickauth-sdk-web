@@ -1,6 +1,6 @@
 {
   "name": "@quickauth/web",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "QuickAuth Web SDK — phone OTP authentication and Meta WhatsApp marketing attribution",
   "license": "MIT",
   "author": "QuickAuth",
