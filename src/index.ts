@@ -1,12 +1,28 @@
 /**
- * @quickauth/web — phone OTP authentication + WhatsApp marketing attribution.
+ * @quickauth/web — headless phone auth + WhatsApp marketing attribution.
  *
  *   import { QuickAuth } from '@quickauth/web'
  *
  *   QuickAuth.init({
  *     onTokenExpiry: async () =>
  *       (await fetch('/api/quickauth-token').then(r => r.json())).sessionToken,
+ *     onAuthEvent: (event) => {
+ *       switch (event.type) {
+ *         case 'OTP_SENT':   showOtpInput(); break
+ *         case 'OTP_AUTO_READ': prefillInput(event.code); break
+ *         case 'VERIFIED':   finishLogin(event.requestId); break
+ *         case 'OTP_FAILED': showError(event.message); break
+ *         case 'ERROR':      showError(event.message); break
+ *       }
+ *     },
  *   })
+ *
+ *   await QuickAuth.auth.initiate({ phone: '+919876543210' })
+ *   // ...wait for OTP_SENT event, collect code from user...
+ *   await QuickAuth.auth.submitOtp('123456')
+ *
+ *   // On user-initiated sign-out:
+ *   QuickAuth.auth.reset({ forgetDevice: true })
  *
  * The `onTokenExpiry` callback must return a fresh `sessionToken` (a
  * short-lived JWT minted by your backend via `POST /v1/sdk/session` with
@@ -14,7 +30,7 @@
  * token ~30s before it expires, so the callback is invoked rarely.
  */
 
-import { startOTP, verifyOTP } from './auth/otp'
+import { initiate, reset, submitOtp } from './auth/session'
 import { startWhatsAppLogin } from './auth/whatsapp'
 import { observeOTP } from './auth/webotp'
 import {
@@ -26,22 +42,23 @@ import { trackConversion } from './attribution/track'
 import { clearQueue, flushQueue, QuickAuthError } from './core/client'
 import { configure, isConfigured } from './core/config'
 import { consent as consentStore } from './core/consent'
+import { setAuthEventHandler } from './core/events'
 import { storage } from './core/storage'
 import { tokenManager, __resetTokenManager } from './core/token'
 import type { InitOptions } from './types'
 
 export type {
   AttributionResult,
+  AuthEvent,
+  AuthEventHandler,
   DeviceInfo,
   FingerprintEnvelope,
+  InitiateOptions,
   InitOptions,
   ObserveOTPOptions,
   OTPChannel,
-  OTPSession,
-  StartOTPOptions,
+  ResetOptions,
   TrackConversionOptions,
-  VerifyOTPOptions,
-  VerifyOTPResult,
   WhatsAppLoginOptions,
 } from './types'
 
@@ -53,12 +70,10 @@ const consent = {
     const previous = consentStore.get()
     consentStore.set(value)
     if (!value && previous) {
-      // Revocation — wipe everything we have queued or remembered locally.
       clearQueue()
       clearAttribution()
     }
     if (value && !previous) {
-      // Grant — flush any queued tracking events. Fire-and-forget.
       void flushQueue()
     }
   },
@@ -66,8 +81,9 @@ const consent = {
 }
 
 const auth = {
-  startOTP,
-  verifyOTP,
+  initiate,
+  submitOtp,
+  reset,
   observeOTP,
   startWhatsAppLogin,
 }
@@ -79,27 +95,12 @@ const attribution = {
 }
 
 export const QuickAuth = {
-  version: '0.1.0',
-  /**
-   * Initialise the SDK.
-   *
-   * Provide ONE of:
-   *  - `onTokenExpiry`: an async callback that returns a fresh sessionToken
-   *    minted by your backend (RECOMMENDED — production-safe).
-   *  - `unsafe.directClientId` + `unsafe.directClientSecret`: trusted-
-   *    deployment-only escape hatch. Embeds your client_secret in the
-   *    bundle. Logs a console warning. NOT recommended.
-   *
-   * Optionally pass `initialToken` if you already have a fresh sessionToken
-   * at init time (skips the first `onTokenExpiry` call).
-   */
+  version: '1.1.0',
   init(options: InitOptions): void {
     configure(options)
-    // Reset token cache so each init() starts cold.
     __resetTokenManager()
     consentStore.hydrate(options.consent)
     if (consentStore.get()) {
-      // Replay any pending events from a previous session.
       void flushQueue()
     }
   },
@@ -107,6 +108,5 @@ export const QuickAuth = {
   consent,
   auth,
   attribution,
-  // Escape hatch for advanced use-cases (testing, custom UIs).
-  _internal: { storage, flushQueue, tokenManager },
+  _internal: { storage, flushQueue, tokenManager, setAuthEventHandler },
 }

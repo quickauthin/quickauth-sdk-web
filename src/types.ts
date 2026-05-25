@@ -48,41 +48,63 @@ export interface InitOptions {
   maxRetries?: number
   /** Optional custom fetch implementation (mainly for tests/SSR). */
   fetch?: typeof fetch
-}
-
-export interface StartOTPOptions {
-  phone: string
-  channel?: OTPChannel
-}
-
-export interface OTPSession {
-  sessionId: string
-  expiresIn: number
-}
-
-export interface VerifyOTPOptions {
-  sessionId: string
-  code: string
+  /**
+   * Headless auth event handler. The SDK invokes this with a typed
+   * {@link AuthEvent} as the auth lifecycle progresses (OTP sent, verified,
+   * failed, error). One handler per init; pass null to {@code QuickAuth.init}
+   * again to replace.
+   *
+   * Events are delivered asynchronously (microtask deferred), so you can
+   * safely write {@code await initiate(); /* events fire next tick *\/}
+   * without racing your own state updates.
+   */
+  onAuthEvent?: AuthEventHandler
 }
 
 /**
- * Result of {@link verifyOTP}.
- *
- * QuickAuth is a verification provider, not an identity provider. We tell
- * you whether the phone was verified — you forward {@link requestId} to
- * your own backend, which confirms server-to-server via
- * `GET /v1/auth/status?requestId=...` (with X-Client-Id / X-Client-Secret)
- * and mints its own session JWT against its own user table.
- *
- * See https://quickauth.in/docs/backend
+ * One callback for the entire auth lifecycle. Switch on {@link AuthEvent.type}
+ * to drive your UI.
  */
-export interface VerifyOTPResult {
-  /** True iff the OTP matched and the phone is now verified. */
-  verified: boolean
-  /** Opaque id — forward this to your backend for server-to-server confirmation. */
-  requestId: string
-  /** Human-readable status, e.g. "Verified successfully" or "Invalid OTP. 2 attempt(s) remaining." */
-  message: string
+export type AuthEventHandler = (event: AuthEvent) => void
+
+/**
+ * Typed auth lifecycle events. The SDK guarantees that for any given
+ * {@code initiate()} call, you'll see at most one terminal event
+ * ({@code VERIFIED} / {@code OTP_FAILED} / {@code ERROR}) for that attempt.
+ * Calling {@code initiate()} again resets the state machine.
+ *
+ * - {@code OTP_SENT} — backend dispatched an OTP. Render the input.
+ * - {@code OTP_AUTO_READ} — browser WebOTP API auto-read the SMS. Pre-fill
+ *   the input. The SDK does NOT auto-submit; merchant decides whether to.
+ * - {@code VERIFIED} — user is authenticated. Covers both fresh OTP success
+ *   and silent device-trust re-auth (no OTP was sent). Forward
+ *   {@code requestId} to your backend.
+ * - {@code OTP_FAILED} — the submitted code was rejected. SDK stays in
+ *   the awaiting-OTP state so the user can retry.
+ * - {@code ERROR} — transport / rate-limit / unexpected failure. Final
+ *   for this attempt.
+ */
+export type AuthEvent =
+  | { type: 'OTP_SENT'; sessionId: string; channel: OTPChannel; expiresIn: number }
+  | { type: 'OTP_AUTO_READ'; code: string }
+  | { type: 'VERIFIED'; requestId: string; message?: string }
+  | { type: 'OTP_FAILED'; message: string }
+  | { type: 'ERROR'; code: string; message: string }
+
+export interface InitiateOptions {
+  /** E.164 phone number, e.g. {@code +919876543210}. */
+  phone: string
+  /** Delivery channel preference. Server picks if omitted or 'auto'. */
+  channel?: OTPChannel
+}
+
+export interface ResetOptions {
+  /**
+   * Also clear the persistent device token. After reset, the next
+   * {@code initiate()} acts like a brand-new install (no OneTap).
+   * Use this on user-initiated sign-out from the merchant app.
+   */
+  forgetDevice?: boolean
 }
 
 export interface WhatsAppLoginOptions {

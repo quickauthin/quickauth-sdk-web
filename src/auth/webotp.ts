@@ -1,3 +1,4 @@
+import { emitAuthEvent } from '../core/events'
 import type { ObserveOTPOptions } from '../types'
 
 interface OTPCredentialLike {
@@ -56,6 +57,9 @@ export function observeOTP(opts: ObserveOTPOptions): () => void {
       if (cred && typeof cred.code === 'string') {
         if (input) input.value = cred.code
         opts.onCode(cred.code)
+        // Also surface to the headless auth event stream so merchants who
+        // only subscribe to onAuthEvent can pick up auto-read codes.
+        emitAuthEvent({ type: 'OTP_AUTO_READ', code: cred.code })
       }
     })
     .catch((err) => {

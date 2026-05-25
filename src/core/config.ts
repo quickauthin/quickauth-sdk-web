@@ -1,4 +1,5 @@
-import type { InitOptions, UnsafeDirectCredentials } from '../types'
+import type { AuthEventHandler, InitOptions, UnsafeDirectCredentials } from '../types'
+import { setAuthEventHandler } from './events'
 import { storage } from './storage'
 
 export interface ResolvedConfig {
@@ -9,6 +10,7 @@ export interface ResolvedConfig {
   onTokenExpiry?: () => Promise<string>
   initialToken?: string
   unsafe?: UnsafeDirectCredentials
+  onAuthEvent?: AuthEventHandler
 }
 
 let current: ResolvedConfig | null = null
@@ -58,7 +60,11 @@ export function configure(opts: InitOptions): ResolvedConfig {
     onTokenExpiry: opts.onTokenExpiry,
     initialToken: opts.initialToken,
     unsafe: hasUnsafe ? opts.unsafe : undefined,
+    onAuthEvent: opts.onAuthEvent,
   }
+  // Register the merchant's single auth event handler. Passing undefined
+  // clears any prior handler (so re-init starts cold).
+  setAuthEventHandler(opts.onAuthEvent ?? null)
   return current
 }
 

@@ -36,7 +36,7 @@ describe('TokenManager — onTokenExpiry callback', () => {
       onTokenExpiry,
     })
 
-    await QuickAuth.auth.startOTP({ phone: '+919876543210' })
+    await QuickAuth.auth.initiate({ phone: '+919876543210' })
     expect(onTokenExpiry).toHaveBeenCalledTimes(1)
     const headers = (mock.fn.mock.calls[0]![1] as RequestInit)
       .headers as Record<string, string>
@@ -61,7 +61,7 @@ describe('TokenManager — onTokenExpiry callback', () => {
       onTokenExpiry,
     })
 
-    await QuickAuth.auth.startOTP({ phone: '+919876543210' })
+    await QuickAuth.auth.initiate({ phone: '+919876543210' })
     // Initial token expires in 10s — under the 30s buffer — should refresh.
     expect(onTokenExpiry).toHaveBeenCalledTimes(1)
     const headers = (mock.fn.mock.calls[0]![1] as RequestInit)
@@ -86,8 +86,8 @@ describe('TokenManager — onTokenExpiry callback', () => {
       onTokenExpiry,
     })
 
-    await QuickAuth.auth.startOTP({ phone: '+919876543210' })
-    await QuickAuth.auth.startOTP({ phone: '+919876543210' })
+    await QuickAuth.auth.initiate({ phone: '+919876543210' })
+    await QuickAuth.auth.initiate({ phone: '+919876543210' })
     // Both calls share the still-fresh initial token — no refresh needed.
     expect(onTokenExpiry).not.toHaveBeenCalled()
   })
@@ -106,8 +106,8 @@ describe('TokenManager — onTokenExpiry callback', () => {
       initialToken: token,
     })
 
-    await QuickAuth.auth.startOTP({ phone: '+919876543210' })
-    await QuickAuth.auth.verifyOTP({ sessionId: 's1', code: '1234' })
+    await QuickAuth.auth.initiate({ phone: '+919876543210' })
+    await QuickAuth.auth.submitOtp('1234')
 
     for (const call of mock.fn.mock.calls) {
       const headers = (call[1] as RequestInit).headers as Record<string, string>
@@ -137,7 +137,7 @@ describe('TokenManager — onTokenExpiry callback', () => {
 
     // Fire 5 concurrent calls — only one refresh should be in flight.
     const calls = Array.from({ length: 5 }, () =>
-      QuickAuth.auth.startOTP({ phone: '+919876543210' }),
+      QuickAuth.auth.initiate({ phone: '+919876543210' }),
     )
     // Yield once so all callers register their listeners on the in-flight refresh.
     await new Promise((r) => setTimeout(r, 0))
@@ -169,8 +169,7 @@ describe('TokenManager — onTokenExpiry callback', () => {
       onTokenExpiry,
     })
 
-    const r = await QuickAuth.auth.startOTP({ phone: '+919876543210' })
-    expect(r.sessionId).toBe('after-refresh')
+    await QuickAuth.auth.initiate({ phone: '+919876543210' })
     expect(mock.fn).toHaveBeenCalledTimes(2)
     expect(onTokenExpiry).toHaveBeenCalledTimes(2)
 
@@ -211,7 +210,7 @@ describe('TokenManager — unsafe direct credentials', () => {
     const warnMsg = (warn.mock.calls[0]![0] as string) ?? ''
     expect(warnMsg).toMatch(/UNSAFE/)
 
-    await QuickAuth.auth.startOTP({ phone: '+919876543210' })
+    await QuickAuth.auth.initiate({ phone: '+919876543210' })
 
     expect(mock.fn).toHaveBeenCalledTimes(2)
     const [mintUrl, mintInit] = mock.fn.mock.calls[0] as [string, RequestInit]

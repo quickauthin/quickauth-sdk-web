@@ -1,6 +1,8 @@
 import { vi } from 'vitest'
 import { QuickAuth } from '../src/index'
+import { __resetSession } from '../src/auth/session'
 import { __resetConfig } from '../src/core/config'
+import { __resetAuthEvents } from '../src/core/events'
 import { storage } from '../src/core/storage'
 import { __resetTokenManager } from '../src/core/token'
 
@@ -62,6 +64,8 @@ export function makeMockFetch(): MockFetch {
 export function resetSdk(): void {
   __resetConfig()
   __resetTokenManager()
+  __resetAuthEvents()
+  __resetSession()
   storage.purge()
 }
 
@@ -81,6 +85,7 @@ export function initSdk(opts: {
   consent?: boolean
   initialToken?: string
   onTokenExpiry?: () => Promise<string>
+  onAuthEvent?: (event: unknown) => void
 }): void {
   QuickAuth.init({
     apiBaseUrl: 'https://api.test.local',
@@ -89,5 +94,6 @@ export function initSdk(opts: {
     maxRetries: 0,
     initialToken: opts.initialToken ?? fakeJwt(600),
     onTokenExpiry: opts.onTokenExpiry ?? (async () => fakeJwt(600)),
+    onAuthEvent: opts.onAuthEvent as never,
   })
 }
