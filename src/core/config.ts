@@ -8,6 +8,9 @@ export interface ResolvedConfig {
   storagePrefix: string
   fetchImpl: typeof fetch
   onTokenExpiry?: () => Promise<string>
+  publishableKey?: string
+  /** True when a non-empty publishableKey was supplied — see {@link configure}. */
+  isPublishableKeyMode: boolean
   initialToken?: string
   unsafe?: UnsafeDirectCredentials
   onAuthEvent?: AuthEventHandler
@@ -31,8 +34,24 @@ export function configure(opts: InitOptions): ResolvedConfig {
   const hasInitialToken =
     typeof opts.initialToken === 'string' && opts.initialToken.length > 0
 
-  if (!hasCallback && !hasInitialToken && !hasUnsafe) {
-    throw new Error('init() requires an onTokenExpiry callback')
+  const isPublishableKeyMode =
+    typeof opts.publishableKey === 'string' && opts.publishableKey.length > 0
+  // Every one of these feeds the token manager, so any of them means the
+  // caller is asking for session-token mode.
+  const hasSessionTokenSource = hasCallback || hasInitialToken || hasUnsafe
+
+  if (!isPublishableKeyMode && !hasSessionTokenSource) {
+    throw new Error(
+      '[QuickAuth] init() requires an auth mode: pass publishableKey (recommended, zero-backend) or onTokenExpiry (server-minted session tokens).',
+    )
+  }
+
+  // The two modes send different credentials on every request, so accepting
+  // both would silently pick one and leave the other looking configured.
+  if (isPublishableKeyMode && hasSessionTokenSource) {
+    throw new Error(
+      '[QuickAuth] init() accepts either publishableKey or onTokenExpiry — not both.',
+    )
   }
 
   if (hasUnsafe && typeof console !== 'undefined') {
@@ -58,6 +77,8 @@ export function configure(opts: InitOptions): ResolvedConfig {
     storagePrefix: prefix,
     fetchImpl,
     onTokenExpiry: opts.onTokenExpiry,
+    publishableKey: isPublishableKeyMode ? opts.publishableKey : undefined,
+    isPublishableKeyMode,
     initialToken: opts.initialToken,
     unsafe: hasUnsafe ? opts.unsafe : undefined,
     onAuthEvent: opts.onAuthEvent,
@@ -71,7 +92,7 @@ export function configure(opts: InitOptions): ResolvedConfig {
 export function getConfig(): ResolvedConfig {
   if (!current) {
     throw new Error(
-      '[QuickAuth] SDK not initialised — call QuickAuth.init({ onTokenExpiry }) first',
+      '[QuickAuth] SDK not initialised — call QuickAuth.init({ publishableKey }) first',
     )
   }
   return current

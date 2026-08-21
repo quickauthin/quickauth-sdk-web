@@ -29,21 +29,45 @@ Or load directly via UMD/IIFE bundle:
 ```html
 <script src="https://unpkg.com/@quickauth/web/dist/index.global.js"></script>
 <script>
-  QuickAuth.init({
-    onTokenExpiry: async () =>
-      (await fetch('/api/quickauth-token').then(r => r.json())).sessionToken,
-  })
+  QuickAuth.init({ publishableKey: 'pk_live_…' })
 </script>
 ```
 
-Get your `client_id` + `client_secret` from the
+Get your publishable key (or `client_id` + `client_secret`) from the
 [QuickAuth dashboard → Developers → Keys](https://app.quickauth.in/settings/api).
 
 ---
 
-## Auth model — short-lived sessionTokens
+## Auth model — pick exactly one
 
-The Web SDK uses the same pattern as Twilio Verify, Stripe Elements, and
+| Mode | Pass | Best for |
+| ---- | ---- | -------- |
+| **Publishable key** (recommended) | `publishableKey: 'pk_live_…'` | Zero-backend. Fastest path to a working login. |
+| **Session token** (extra-hardened) | `onTokenExpiry: async () => …` | Teams that want every OTP call gated behind their own backend. |
+
+Supplying both — or neither — throws at `init()`.
+
+### Publishable-key mode
+
+```js
+QuickAuth.init({ publishableKey: 'pk_live_…' })
+```
+
+The key ships in your bundle by design. Unlike a client **secret**, the
+backend scopes a publishable key to OTP initiate/verify only, locks it to
+the web origins you register in the dashboard, and rate-limits it. The SDK
+sends it as `X-QuickAuth-Key`; no session token is involved.
+
+Web sends **no** app-identity header — the browser sets `Origin` and the
+backend authorises the key against that. (The Android/iOS/Flutter SDKs do
+send one, since native apps have no `Origin`.)
+
+Register every origin you serve from, including `localhost` ports used in
+development, or the backend will reject the key.
+
+### Session-token mode — short-lived sessionTokens
+
+The alternative is the pattern used by Twilio Verify, Stripe Elements, and
 every modern client SDK: your **backend** mints a 10-minute JWT (a
 `sessionToken`), and the SDK uses that JWT as a Bearer token. Your
 `client_secret` **never** leaves your server.
@@ -123,7 +147,8 @@ const { verified, requestId } = await QuickAuth.auth.verifyOTP({
 
 | Option           | Type                                    | Default                      |
 | ---------------- | --------------------------------------- | ---------------------------- |
-| `onTokenExpiry`  | `() => Promise<string>` (recommended)   | —                            |
+| `publishableKey` | `string` (recommended)                  | —                            |
+| `onTokenExpiry`  | `() => Promise<string>`                 | —                            |
 | `initialToken`   | `string`                                | —                            |
 | `unsafe`         | `{ directClientId, directClientSecret }`| — (NOT RECOMMENDED)          |
 | `apiBaseUrl`     | `string`                                | `https://api.quickauth.in`   |
@@ -132,8 +157,10 @@ const { verified, requestId } = await QuickAuth.auth.verifyOTP({
 | `maxRetries`     | `number`                                | `3`                          |
 | `fetch`          | `typeof fetch`                          | global `fetch`               |
 
-You **must** provide one of: `onTokenExpiry`, `initialToken`, or `unsafe`.
-Otherwise `init()` throws `Error("init() requires an onTokenExpiry callback")`.
+You **must** provide exactly one auth mode: either `publishableKey`, or a
+session-token source (`onTokenExpiry` / `initialToken` / `unsafe`). Passing
+neither throws; passing a publishable key *and* a session-token source also
+throws, since the two use different credentials on every request.
 
 If you already have a fresh token at init time (e.g. server-rendered into
 the HTML), pass it as `initialToken` to skip the first network round-trip.

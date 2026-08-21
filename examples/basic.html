@@ -82,12 +82,14 @@
 
       QuickAuth.init({
         apiBaseUrl: 'https://api.quickauth.in',
-        // Customer's backend exposes /api/quickauth-token, which calls
-        // POST https://api.quickauth.in/v1/sdk/session with X-Client-Id +
-        // X-Client-Secret and returns { sessionToken, expiresIn }.
-        onTokenExpiry: async () =>
-          (await fetch('/api/quickauth-token').then((r) => r.json()))
-            .sessionToken,
+        // Zero-backend mode: the publishable key is safe to ship in the page
+        // (OTP-scoped, origin-locked, rate-limited on the backend).
+        publishableKey: 'pk_live_replace_me',
+        // Alternatively, drop publishableKey and let your own backend mint
+        // short-lived session JWTs:
+        //   onTokenExpiry: async () =>
+        //     (await fetch('/api/quickauth-token').then((r) => r.json()))
+        //       .sessionToken,
       })
 
       document.getElementById('consent').addEventListener('change', (e) => {

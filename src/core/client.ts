@@ -67,20 +67,39 @@ async function rawPost<T>(
 
   for (let attempt = 0; attempt <= cfg.maxRetries; attempt++) {
     try {
-      const token = await getToken()
+      // Only these headers survive the backend's CORS preflight
+      // (Authorization, Content-Type, Idempotency-Key, X-Request-Id) plus the
+      // publishable-key header that key mode adds. Anything else makes the
+      // browser fail the OPTIONS check and the request never leaves the tab,
+      // so do not add headers here without extending the server allowlist.
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      }
+
+      if (cfg.isPublishableKeyMode) {
+        // The publishable key IS the credential — deliberately never touch the
+        // token manager here, since key mode has no token source configured
+        // and asking for one would throw.
+        headers['X-QuickAuth-Key'] = cfg.publishableKey as string
+        // No app-identity header on WEB: the browser sets `Origin` and the
+        // backend uses that. The Android/iOS/Flutter SDKs do send one
+        // (X-QuickAuth-Package / -Bundle), so this asymmetry is deliberate,
+        // not an omission — a page cannot set or forge Origin.
+      } else {
+        headers.Authorization = `Bearer ${await getToken()}`
+      }
+
       const res = await cfg.fetchImpl(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-          'Idempotency-Key': idempotencyKey,
-          'X-QA-SDK': 'web/0.1.0',
-        },
+        headers,
         body: JSON.stringify(body ?? {}),
         signal: options.signal,
       })
 
-      if (res.status === 401 && !didRetryAfter401) {
+      // A 401 in key mode is the server rejecting the key itself; refreshing a
+      // token we never sent would just replay the same failure.
+      if (res.status === 401 && !didRetryAfter401 && !cfg.isPublishableKeyMode) {
         // Token rejected — invalidate cache, refresh, and try once more.
         didRetryAfter401 = true
         invalidateToken()
