@@ -67,7 +67,9 @@ async function mintViaUnsafe(): Promise<string> {
       'Content-Type': 'application/json',
       'X-Client-Id': cfg.unsafe.directClientId,
       'X-Client-Secret': cfg.unsafe.directClientSecret,
-      'X-QA-SDK': 'web/0.1.0',
+      // NOTE: X-Client-Id / X-Client-Secret are themselves outside the API's
+      // CORS allowlist, so this unsafe path only works from a non-browser
+      // caller. Left as-is — it is an escape hatch, not a supported flow.
     },
     body: JSON.stringify({}),
   })

@@ -4,8 +4,7 @@
  *   import { QuickAuth } from '@quickauth/web'
  *
  *   QuickAuth.init({
- *     onTokenExpiry: async () =>
- *       (await fetch('/api/quickauth-token').then(r => r.json())).sessionToken,
+ *     publishableKey: 'pk_live_…',
  *     onAuthEvent: (event) => {
  *       switch (event.type) {
  *         case 'OTP_SENT':   showOtpInput(); break
@@ -24,10 +23,15 @@
  *   // On user-initiated sign-out:
  *   QuickAuth.auth.reset({ forgetDevice: true })
  *
- * The `onTokenExpiry` callback must return a fresh `sessionToken` (a
- * short-lived JWT minted by your backend via `POST /v1/sdk/session` with
- * your `X-Client-Id` + `X-Client-Secret`). The SDK auto-refreshes the
- * token ~30s before it expires, so the callback is invoked rarely.
+ * Pick exactly one auth mode:
+ *
+ * - `publishableKey` — zero-backend. Safe to embed: the backend scopes the
+ *   key to OTP initiate/verify, locks it to your registered web origin, and
+ *   rate-limits it. Sent as `X-QuickAuth-Key`; no session token involved.
+ * - `onTokenExpiry` — extra-hardened. The callback must return a fresh
+ *   `sessionToken` (a short-lived JWT minted by your backend via
+ *   `POST /v1/sdk/session` with your `X-Client-Id` + `X-Client-Secret`).
+ *   The SDK auto-refreshes ~30s before expiry, so it is invoked rarely.
  */
 
 import { initiate, reset, submitOtp } from './auth/session'
@@ -45,6 +49,7 @@ import { consent as consentStore } from './core/consent'
 import { setAuthEventHandler } from './core/events'
 import { storage } from './core/storage'
 import { tokenManager, __resetTokenManager } from './core/token'
+import { SDK_VERSION } from './core/version'
 import type { InitOptions } from './types'
 
 export type {
@@ -95,7 +100,7 @@ const attribution = {
 }
 
 export const QuickAuth = {
-  version: '1.1.0',
+  version: SDK_VERSION,
   init(options: InitOptions): void {
     configure(options)
     __resetTokenManager()

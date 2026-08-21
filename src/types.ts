@@ -20,10 +20,26 @@ export interface InitOptions {
   /** Optional override of the API base URL. Defaults to https://api.quickauth.in */
   apiBaseUrl?: string
   /**
-   * REQUIRED — async callback that returns a fresh QuickAuth sessionToken
+   * Publishable key (`pk_live_…` / `pk_test_…`) — the in-page-safe credential
+   * for the zero-backend auth mode.
+   *
+   * Unlike the client **secret**, a publishable key is *designed* to ship in
+   * the browser bundle: on the backend it is scoped to OTP initiate/verify
+   * only, locked to your registered web origin, and rate-limited. When set,
+   * the SDK sends it as `X-QuickAuth-Key` and no session token is involved.
+   *
+   * Exactly one of {@link publishableKey} or {@link onTokenExpiry} may be
+   * supplied. Use `publishableKey` for the zero-backend quick-start; use
+   * `onTokenExpiry` for the extra-hardened server-minted-token flow.
+   */
+  publishableKey?: string
+  /**
+   * Async callback that returns a fresh QuickAuth sessionToken
    * (a short-lived JWT minted by the customer's backend via
    * `POST /v1/sdk/session`). The SDK invokes this when no token is cached
    * or ~30s before the current token expires.
+   *
+   * Required unless {@link publishableKey} is set.
    */
   onTokenExpiry?: () => Promise<string>
   /**

@@ -183,17 +183,39 @@ export function __getSessionState(): SessionState {
   return state
 }
 
+/** Test-only — direct access to the error-code mapping. */
+export function __classifyError(err: unknown): string {
+  return classifyError(err)
+}
+
 /** Test-only — fully resets state and attempt counter. */
 export function __resetSession(): void {
   state = { kind: 'idle' }
   attemptCounter = 0
 }
 
+/**
+ * Map a thrown error to the machine-readable `code` on an ERROR event.
+ *
+ * The backend's own code lives at `body.errorCode` — QuickAuthError carries
+ * only `status` and `body`, so reading `err.code` (as this once did) never
+ * matched and every failure flattened to CLIENT_ERROR/SERVER_ERROR. The
+ * status buckets remain as the fallback for transport-level failures that
+ * never produced a JSON body.
+ */
 function classifyError(err: unknown): string {
-  const e = err as { code?: string; status?: number }
+  const e = err as { code?: string; status?: number; body?: unknown }
+  const body = e?.body as { errorCode?: unknown } | null | undefined
+  if (body && typeof body === 'object' && typeof body.errorCode === 'string') {
+    return body.errorCode
+  }
   if (typeof e?.code === 'string') return e.code
   if (typeof e?.status === 'number') {
     if (e.status === 429) return 'RATE_LIMITED'
+    // 402 is the merchant being out of credits. Without its own branch it
+    // reads as a generic CLIENT_ERROR — indistinguishable from a bad phone
+    // number — and merchants chase the wrong bug.
+    if (e.status === 402) return 'INSUFFICIENT_BALANCE'
     if (e.status >= 500) return 'SERVER_ERROR'
     if (e.status >= 400) return 'CLIENT_ERROR'
   }
