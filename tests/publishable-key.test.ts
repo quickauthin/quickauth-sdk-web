@@ -4,6 +4,7 @@ import { __classifyError } from '../src/auth/session'
 import { QuickAuthError } from '../src/core/client'
 import type { AuthEvent } from '../src/types'
 import { fakeJwt, makeMockFetch, resetSdk } from './_helpers'
+import pkg from '../package.json'
 
 const flushEvents = (): Promise<void> => Promise.resolve()
 
@@ -216,7 +217,11 @@ describe('CORS-safe request headers', () => {
   })
 
   it('reports the package version, not a stale hardcoded one', () => {
-    expect(QuickAuth.version).toBe('1.1.0')
+    // Guards the drift this branch fixes: the wire version sat at 0.1.0 while
+    // package.json was on 1.1.0. `npm test` runs after the version bump in
+    // the publish workflow, so a desynced src/core/version.ts fails the
+    // release instead of shipping another wrong version string.
+    expect(QuickAuth.version).toBe(pkg.version)
   })
 })
 

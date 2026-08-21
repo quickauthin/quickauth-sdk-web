@@ -67,6 +67,23 @@ jobs:
         # so the order is: bump → build → test → publish → commit+tag.
         run: npm version ${{ inputs.version }} --no-git-tag-version
 
+      - name: Bump the SDK version constant
+        # src/core/version.ts is what the SDK reports at runtime. It bumps
+        # here because npm version does not know about it; the Test step
+        # below asserts the two agree, so a missed bump fails the release
+        # rather than shipping a wrong version string (which is how the old
+        # `web/0.1.0` string survived three minors).
+        run: |
+          node -e '
+            const fs = require("fs")
+            const p = "src/core/version.ts"
+            const v = require("./package.json").version
+            const s = fs.readFileSync(p, "utf8")
+            const out = s.replace(/SDK_VERSION = .*/, `SDK_VERSION = '${v}'`)
+            if (out === s) { console.error(`::error::could not rewrite SDK_VERSION in ${p}`); process.exit(1) }
+            fs.writeFileSync(p, out)
+          '
+
       - name: Build
         run: npm run build
 
@@ -90,7 +107,7 @@ jobs:
 
       - name: Commit version bump + tag + push
         run: |
-          git add package.json package-lock.json
+          git add package.json package-lock.json src/core/version.ts
           git commit -m "chore(release): v${{ inputs.version }}"
           git tag -a "v${{ inputs.version }}" -m "v${{ inputs.version }}"
           git push origin HEAD --follow-tags
