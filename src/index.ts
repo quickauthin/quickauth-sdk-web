@@ -30,7 +30,7 @@
  * token ~30s before it expires, so the callback is invoked rarely.
  */
 
-import { initiate, reset, submitOtp } from './auth/session'
+import { initiate, resendOtp, reset, submitOtp } from './auth/session'
 import { startWhatsAppLogin } from './auth/whatsapp'
 import { observeOTP } from './auth/webotp'
 import {
@@ -83,6 +83,7 @@ const consent = {
 const auth = {
   initiate,
   submitOtp,
+  resendOtp,
   reset,
   observeOTP,
   startWhatsAppLogin,
