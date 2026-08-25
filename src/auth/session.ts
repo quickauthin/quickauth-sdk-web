@@ -74,6 +74,40 @@ function withDeviceFields(body: Record<string, unknown>): Record<string, unknown
   return body
 }
 
+/**
+ * The phone and channel of the live attempt, so `resendOtp` needs no arguments.
+ *
+ * A merchant should not have to hold the number themselves to resend to it — they already gave
+ * it to us, and asking again is an opportunity to pass a different one, which would start a
+ * second transaction and leave the user holding two codes.
+ */
+let activePhone: string | null = null
+let activeChannel: OTPChannel = 'auto'
+
+/**
+ * Send the code again, to the number the current attempt is already for.
+ *
+ * Within the merchant's expiry window the server returns the SAME code and pushes the expiry
+ * forward, so a user who missed the first message gets that message again rather than a second
+ * code to choose between. Past the window it issues a fresh one.
+ *
+ * Takes no phone number deliberately: the merchant already gave us one, and asking again is an
+ * opportunity to pass a different one by accident — which would start a separate transaction
+ * and leave the user holding two codes, only one of which works.
+ *
+ * Carries the original attempt's channel, so a resend behaves like the request it repeats
+ * rather than silently reverting to the default.
+ *
+ * Throws if there is nothing to resend: a resend button should only exist once a code has been
+ * sent, so reaching it otherwise is a programming error rather than a runtime condition.
+ */
+export async function resendOtp(): Promise<void> {
+  if (!activePhone) {
+    throw new Error('[QuickAuth] resendOtp: nothing to resend — call initiate() first.')
+  }
+  await initiate({ phone: activePhone, channel: activeChannel })
+}
+
 export async function initiate(opts: InitiateOptions): Promise<void> {
   if (!opts || typeof opts.phone !== 'string' || !E164.test(opts.phone)) {
     throw new Error(
@@ -83,6 +117,9 @@ export async function initiate(opts: InitiateOptions): Promise<void> {
   const channel: OTPChannel = opts.channel ?? 'auto'
   const attemptId = ++attemptCounter
   state = { kind: 'sending', attemptId }
+
+  activePhone = opts.phone
+  activeChannel = channel
 
   const body = withDeviceFields({ phone: opts.phone, channel })
 
@@ -173,6 +210,9 @@ export async function submitOtp(code: string): Promise<void> {
 export function reset(opts?: ResetOptions): void {
   state = { kind: 'idle' }
   attemptCounter++
+  // Nothing left to resend to: a reset ends the attempt, and resending afterwards would
+  // message someone who is no longer mid-login.
+  activePhone = null
   if (opts?.forgetDevice) {
     storage.remove(DEVICE_TOKEN_KEY)
   }
