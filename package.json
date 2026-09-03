@@ -1,6 +1,6 @@
 {
   "name": "@quickauth/web",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "QuickAuth Web SDK — phone OTP authentication and Meta WhatsApp marketing attribution",
   "license": "MIT",
   "author": "QuickAuth",
@@ -39,12 +39,14 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node scripts/flatten-iife.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "typecheck": "tsc --noEmit",
+    "verify:dist": "node scripts/check-dist.mjs",
+    "prepublishOnly": "npm run build && npm test && npm run verify:dist",
     "size": "du -h dist/index.esm.js"
   },
   "peerDependencies": {},
