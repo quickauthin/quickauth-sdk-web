@@ -73,6 +73,13 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Verify dist matches package.json
+        # Belt and braces: `npm publish` runs the same check via
+        # prepublishOnly, but failing here gives a clearer signal than a
+        # failure inside the publish step. The 1.1.0 tarball shipped a v0.1.0
+        # build because nothing verified the built files before publishing.
+        run: npm run verify:dist
+
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
