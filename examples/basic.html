@@ -30,6 +30,8 @@
         margin-top: 1rem;
       }
       button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .inline { display: flex; gap: 0.5rem; }
+      .inline button { margin-top: 0; }
       pre {
         background: #f5f5f5;
         padding: 0.8rem;
@@ -51,6 +53,13 @@
       </label>
     </div>
 
+    <div class="row">
+      <input id="autosubmit" type="checkbox" />
+      <label for="autosubmit" style="margin: 0">
+        Verify automatically when the code is read from the SMS
+      </label>
+    </div>
+
     <label for="phone">Phone (E.164)</label>
     <input id="phone" type="tel" placeholder="+919876543210" />
     <button id="send">Send OTP</button>
@@ -63,18 +72,23 @@
       autocomplete="one-time-code"
       placeholder="123456"
     />
-    <button id="verify" disabled>Verify</button>
+    <div class="inline">
+      <button id="verify" disabled>Verify</button>
+      <button id="resend" disabled>Resend</button>
+    </div>
 
     <h2 style="margin-top: 2rem">Result</h2>
     <pre id="out">awaiting input</pre>
 
     <!--
-      The tsup IIFE bundle exposes the namespace as `QuickAuth` on `window`.
+      The IIFE bundle exposes the SDK flat on `window`: QuickAuth.init(...),
+      NOT QuickAuth.QuickAuth.init(...) — the 1.1.0 build was double-nested.
       Replace the relative src with a CDN URL once the package is published.
     -->
     <script src="../dist/index.global.js"></script>
     <script>
-      const out = document.getElementById('out')
+      const $ = (id) => document.getElementById(id)
+      const out = $('out')
       const log = (msg) => {
         out.textContent =
           typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2)
@@ -88,9 +102,51 @@
         onTokenExpiry: async () =>
           (await fetch('/api/quickauth-token').then((r) => r.json()))
             .sessionToken,
+
+        // ONE handler for the whole lifecycle. Every outcome arrives here —
+        // the methods below return promises, but the events are what you
+        // render from.
+        onAuthEvent: (event) => {
+          switch (event.type) {
+            case 'OTP_SENT':
+              $('verify').disabled = false
+              $('resend').disabled = false
+              log({ stage: 'sent', ...event })
+              break
+
+            case 'OTP_AUTO_READ':
+              // The SDK armed WebOTP inside initiate() — no observeOTP call
+              // is needed to get here.
+              $('code').value = event.code
+              $('verify').disabled = false
+              log({ stage: 'auto-read', code: event.code })
+              break
+
+            case 'VERIFIED':
+              $('verify').disabled = true
+              $('resend').disabled = true
+              log({ stage: 'verified', requestId: event.requestId })
+              // Hand requestId to your backend, which confirms it
+              // server-to-server and mints your own session.
+              QuickAuth.attribution.trackConversion({
+                event: 'login',
+                currency: 'INR',
+              })
+              break
+
+            case 'OTP_FAILED':
+              // Retry-able: the SDK stays ready for another submitOtp().
+              log({ stage: 'wrong code', message: event.message })
+              break
+
+            case 'ERROR':
+              log({ stage: 'error', code: event.code, message: event.message })
+              break
+          }
+        },
       })
 
-      document.getElementById('consent').addEventListener('change', (e) => {
+      $('consent').addEventListener('change', (e) => {
         QuickAuth.consent.set(e.target.checked)
       })
 
@@ -99,42 +155,36 @@
         if (r.matched) console.log('[QuickAuth] matched campaign', r)
       })
 
-      // Wire WebOTP autofill on the OTP input.
-      QuickAuth.auth.observeOTP({
-        input: '#code',
-        onCode: (code) => {
-          document.getElementById('code').value = code
-          document.getElementById('verify').disabled = false
-        },
-      })
+      // Optional. Auto-read already works through OTP_AUTO_READ above; this
+      // only stamps autocomplete="one-time-code" on the input for iOS
+      // QuickType, and shares the SDK's single WebOTP request.
+      QuickAuth.auth.observeOTP({ input: '#code', onCode: () => {} })
 
-      let session = null
-
-      document.getElementById('send').addEventListener('click', async () => {
+      $('send').addEventListener('click', async () => {
         try {
-          session = await QuickAuth.auth.startOTP({
-            phone: document.getElementById('phone').value.trim(),
+          await QuickAuth.auth.initiate({
+            phone: $('phone').value.trim(),
             channel: 'auto',
+            autoSubmit: $('autosubmit').checked,
           })
-          document.getElementById('verify').disabled = false
-          log({ stage: 'sent', session })
         } catch (err) {
           log('Error: ' + (err && err.message ? err.message : err))
         }
       })
 
-      document.getElementById('verify').addEventListener('click', async () => {
-        if (!session) return
+      $('verify').addEventListener('click', async () => {
         try {
-          const result = await QuickAuth.auth.verifyOTP({
-            sessionId: session.sessionId,
-            code: document.getElementById('code').value.trim(),
-          })
-          log({ stage: 'verified', result })
-          await QuickAuth.attribution.trackConversion({
-            event: 'login',
-            currency: 'INR',
-          })
+          await QuickAuth.auth.submitOtp($('code').value.trim())
+        } catch (err) {
+          log('Error: ' + (err && err.message ? err.message : err))
+        }
+      })
+
+      // No phone number: resendOtp() replays the number, channel and
+      // autoSubmit setting the current attempt already has.
+      $('resend').addEventListener('click', async () => {
+        try {
+          await QuickAuth.auth.resendOtp()
         } catch (err) {
           log('Error: ' + (err && err.message ? err.message : err))
         }

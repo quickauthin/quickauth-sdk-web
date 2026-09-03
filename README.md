@@ -7,7 +7,9 @@ authentication and Meta WhatsApp marketing attribution for web apps.
 - ES2020 modern bundle (ESM + CJS + UMD/IIFE)
 - < 15 KB gzipped
 - Built-in **DPDP / GDPR** consent gate
-- Native **WebOTP** auto-fill (with autocomplete fallback for iOS/Firefox)
+- **Headless** — one typed event stream, bring your own UI
+- Native **WebOTP** auto-read, armed for you, with opt-in auto-submit
+  (autocomplete fallback for iOS/Firefox)
 - Idempotent POSTs with exponential-backoff retry and offline queue
 - **Token-based auth** — short-lived JWTs minted by your backend, never
   embed your client secret in the browser
@@ -29,12 +31,18 @@ Or load directly via UMD/IIFE bundle:
 ```html
 <script src="https://unpkg.com/@quickauth/web/dist/index.global.js"></script>
 <script>
+  // The global is flat: window.QuickAuth.init, not window.QuickAuth.QuickAuth.init.
   QuickAuth.init({
     onTokenExpiry: async () =>
       (await fetch('/api/quickauth-token').then(r => r.json())).sessionToken,
+    onAuthEvent: (event) => console.log(event.type, event),
   })
 </script>
 ```
+
+> **1.1.0 users:** that build's global was double-nested
+> (`window.QuickAuth.QuickAuth`). It is flat from 1.2.0 on. Drop the extra
+> `.QuickAuth` when you upgrade.
 
 Get your `client_id` + `client_secret` from the
 [QuickAuth dashboard → Developers → Keys](https://app.quickauth.in/settings/api).
@@ -92,28 +100,44 @@ That's it. The SDK:
 
 ## Quick start
 
+The flow is **headless and event-driven**: you call three methods, and every
+outcome arrives on one handler. There is no return value to branch on.
+
 ```ts
 import { QuickAuth } from '@quickauth/web'
 
 QuickAuth.init({
   onTokenExpiry: async () =>
     (await fetch('/api/quickauth-token').then(r => r.json())).sessionToken,
+
+  onAuthEvent: (event) => {
+    switch (event.type) {
+      case 'OTP_SENT':      showOtpInput(event.expiresIn); break
+      case 'OTP_AUTO_READ': prefill(event.code); break
+      case 'VERIFIED':      finishLogin(event.requestId); break
+      case 'OTP_FAILED':    showError(event.message); break   // retry-able
+      case 'ERROR':         showError(event.message); break   // attempt is over
+    }
+  },
 })
 
-// 1. Send OTP
-const session = await QuickAuth.auth.startOTP({ phone: '+919876543210' })
+// 1. Start an attempt. Also arms WebOTP auto-read for you.
+await QuickAuth.auth.initiate({ phone: '+919876543210', autoSubmit: true })
 
-// 2. Verify
-const { verified, requestId } = await QuickAuth.auth.verifyOTP({
-  sessionId: session.sessionId,
-  code: '123456',
-})
+// 2. Verify the code the user typed (skip this when autoSubmit did it).
+await QuickAuth.auth.submitOtp('123456')
 
-// 3. Forward `requestId` to your backend, which confirms with QuickAuth
-//    server-to-server (GET /v1/auth/status?requestId=...) and mints its
-//    own session JWT. QuickAuth is verification-only — your backend owns
-//    the session. See https://quickauth.in/docs/backend
+// 3. Same number, same channel, no arguments.
+await QuickAuth.auth.resendOtp()
+
+// Forward `requestId` from the VERIFIED event to your backend, which confirms
+// with QuickAuth server-to-server (GET /v1/auth/status?requestId=...) and
+// mints its own session. QuickAuth is verification-only — your backend owns
+// the session. See https://quickauth.in/docs/backend
 ```
+
+`VERIFIED` also covers silent device-trust re-auth: when the browser is already
+trusted, `initiate()` emits `VERIFIED` and no OTP screen is needed at all.
 
 ---
 
@@ -131,6 +155,7 @@ const { verified, requestId } = await QuickAuth.auth.verifyOTP({
 | `storagePrefix`  | `string`                                | `qa_`                        |
 | `maxRetries`     | `number`                                | `3`                          |
 | `fetch`          | `typeof fetch`                          | global `fetch`               |
+| `onAuthEvent`    | `(event: AuthEvent) => void`            | —                            |
 
 You **must** provide one of: `onTokenExpiry`, `initialToken`, or `unsafe`.
 Otherwise `init()` throws `Error("init() requires an onTokenExpiry callback")`.
@@ -156,20 +181,86 @@ While consent is `false`, conversion events are queued in `localStorage` and
 replayed automatically when consent is granted. Revoking consent clears the
 queue, the device fingerprint cache, and any stored `qa_clid`.
 
+### Top-level facade
+
+```ts
+QuickAuth.init(options)              // configure; safe to call again to reconfigure
+QuickAuth.isInitialized              // boolean
+QuickAuth.config                     // resolved config (throws before init)
+QuickAuth.version                    // semver of this build
+QuickAuth.tokenManager               // { getToken(), invalidate() }
+QuickAuth.setAuthEventHandler(fn)    // attach/replace the handler after init; null detaches
+QuickAuth.consent                    // DPDP / GDPR gate
+QuickAuth.auth                       // the OTP state machine (below)
+QuickAuth.attribution                // click attribution + conversions
+QuickAuth.whatsapp.open(opts)        // raw wa.me deep link
+QuickAuth.reset()                    // tear the SDK back down to pre-init
+```
+
+`QuickAuth.reset()` is the whole-SDK teardown — it clears the configuration, so
+`init()` must be called again afterwards. To end a login attempt while staying
+initialised (including sign-out), use `QuickAuth.auth.reset({ forgetDevice: true })`.
+
 ### Authentication
 
 ```ts
-QuickAuth.auth.startOTP({ phone, channel })   // channel: 'sms' | 'whatsapp' | 'auto'
-QuickAuth.auth.verifyOTP({ sessionId, code }) // returns { verified, requestId, message }
-QuickAuth.auth.observeOTP({ onCode, input })  // WebOTP + autocomplete fallback
+QuickAuth.auth.initiate({ phone, channel, autoSubmit })  // channel: 'sms' | 'whatsapp' | 'auto'
+QuickAuth.auth.submitOtp(code)                           // 4–8 digits
+QuickAuth.auth.resendOtp()                               // no arguments — see below
+QuickAuth.auth.publishAutoReadCode(code)                 // feed a code in yourself
+QuickAuth.auth.reset({ forgetDevice })                   // end the attempt
+QuickAuth.auth.observeOTP({ onCode, input })             // optional: codes in a callback
 QuickAuth.auth.startWhatsAppLogin({ businessNumber, returnUrl })
 ```
 
-`observeOTP` will:
-1. Stamp `autocomplete="one-time-code"` and `inputmode="numeric"` on your
+Every method reports through `onAuthEvent`. The returned promises resolve when
+the network call completes; treat the events as the source of truth for what to
+render. Concurrent `initiate()` calls are latest-wins — the older attempt is
+dropped and its late responses are discarded.
+
+**`resendOtp()` takes no phone number, deliberately.** It replays the number the
+current attempt is already for, carrying that attempt's `channel` and
+`autoSubmit` forward. Asking for the number again is an opportunity to pass a
+different one by accident, which starts a second transaction and leaves the user
+holding two codes, only one of which works. Within your expiry window the server
+returns the *same* code and extends it; past the window it issues a fresh one.
+It rejects when there is no attempt to resend — a resend button should only
+exist after `OTP_SENT`.
+
+### Auto-read and auto-submit
+
+`initiate()` arms WebOTP itself. You do **not** have to call `observeOTP` to get
+`OTP_AUTO_READ` events or auto-submit — a caller who never subscribes to
+anything still gets both.
+
+```ts
+await QuickAuth.auth.initiate({ phone, autoSubmit: true })
+// Chrome/Android: OS reads the SMS → OTP_AUTO_READ → SDK verifies → VERIFIED
+```
+
+- `autoSubmit` is **off by default**. Submitting on your behalf spends one of
+  the user's verification attempts, so it is opted into.
+- At most **one** auto-submit happens per attempt. A code can reach the SDK
+  twice (an SMS and a WhatsApp copy of the same message, or WebOTP plus your own
+  `publishAutoReadCode`); the second submission would verify a code the server
+  has already consumed and would surface as a failure arriving *after* a
+  success.
+- The WebOTP request is re-armed on every attempt and torn down on `reset()`,
+  on supersede, and once the attempt is verified —
+  `navigator.credentials.get()` resolves once and is then spent, and a browser
+  honours only one outstanding request.
+- `publishAutoReadCode(code)` feeds a code in from anywhere else (your own SMS
+  webhook, a paste handler, a native shell). It behaves exactly as a WebOTP read
+  does, including the one-shot latch.
+
+`observeOTP` remains available when you want the code in a callback or the input
+auto-filled. It:
+1. Stamps `autocomplete="one-time-code"` and `inputmode="numeric"` on your
    target input (so iOS QuickType can offer the SMS code).
-2. On Chrome / Edge for Android, call `navigator.credentials.get({ otp })` so
-   the OS automatically reads the SMS and fires `onCode(code)`.
+2. Shares the SDK's single WebOTP request rather than starting a competing one.
+
+It does **not** emit `OTP_AUTO_READ` itself — the state machine does, exactly
+once per code, so a merchant listening to both does not see the same code twice.
 
 ### Attribution
 
@@ -223,7 +314,7 @@ QuickAuth.init({
 
 ## Browser compatibility
 
-| Browser              | OTP send/verify | WebOTP auto-fill              | Attribution |
+| Browser              | OTP send/verify | WebOTP auto-read              | Attribution |
 | -------------------- | --------------- | ----------------------------- | ----------- |
 | Chrome (Android)     | ✅              | ✅                            | ✅          |
 | Edge (Android)       | ✅              | ✅                            | ✅          |
@@ -250,6 +341,15 @@ most Android keyboards.
 | `dist/index.d.ts`      | TypeScript declarations                  |
 
 Target bundle size: **< 15 KB gzipped**.
+
+The version is single-sourced from `package.json`: it is injected at build time
+(`__QA_SDK_VERSION__`) and read by `QuickAuth.version` and the `X-QA-SDK`
+request header. There is no second copy to update.
+
+`npm publish` runs `prepublishOnly` — build, tests, then
+`scripts/check-dist.mjs`, which refuses to publish a `dist/` that does not carry
+the current version and the current API. (1.1.0 went out containing a v0.1.0
+build; this is the stop.)
 
 ---
 
