@@ -1,4 +1,4 @@
-# @quickauth/web
+# @quickauthin/web
 
 Tiny TypeScript SDK for [QuickAuth](https://quickauth.in) — phone OTP
 authentication and Meta WhatsApp marketing attribution for web apps.
@@ -19,17 +19,17 @@ authentication and Meta WhatsApp marketing attribution for web apps.
 ## Install
 
 ```bash
-npm install @quickauth/web
+npm install @quickauthin/web
 # or
-pnpm add @quickauth/web
+pnpm add @quickauthin/web
 # or
-yarn add @quickauth/web
+yarn add @quickauthin/web
 ```
 
 Or load directly via UMD/IIFE bundle:
 
 ```html
-<script src="https://unpkg.com/@quickauth/web/dist/index.global.js"></script>
+<script src="https://unpkg.com/@quickauthin/web/dist/index.global.js"></script>
 <script>
   // The global is flat: window.QuickAuth.init, not window.QuickAuth.QuickAuth.init.
   QuickAuth.init({
@@ -77,7 +77,7 @@ Rails, Laravel, Cloudflare Workers, etc.
 ### 2. Wire the SDK to your endpoint
 
 ```js
-import { QuickAuth } from '@quickauth/web'
+import { QuickAuth } from '@quickauthin/web'
 
 QuickAuth.init({
   onTokenExpiry: async () =>
@@ -104,7 +104,7 @@ The flow is **headless and event-driven**: you call three methods, and every
 outcome arrives on one handler. There is no return value to branch on.
 
 ```ts
-import { QuickAuth } from '@quickauth/web'
+import { QuickAuth } from '@quickauthin/web'
 
 QuickAuth.init({
   onTokenExpiry: async () =>

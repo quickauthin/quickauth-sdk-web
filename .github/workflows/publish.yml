@@ -105,9 +105,9 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "## ✅ Published @quickauth/web@${{ inputs.version }}"
+            echo "## ✅ Published @quickauthin/web@${{ inputs.version }}"
             echo ""
-            echo "- npm: https://www.npmjs.com/package/@quickauth/web/v/${{ inputs.version }}"
+            echo "- npm: https://www.npmjs.com/package/@quickauthin/web/v/${{ inputs.version }}"
             echo "- Tag: \`v${{ inputs.version }}\`"
-            echo "- Install: \`npm install @quickauth/web@${{ inputs.version }}\`"
+            echo "- Install: \`npm install @quickauthin/web@${{ inputs.version }}\`"
           } >> $GITHUB_STEP_SUMMARY

@@ -1,7 +1,7 @@
 /**
- * @quickauth/web — headless phone auth + WhatsApp marketing attribution.
+ * @quickauthin/web — headless phone auth + WhatsApp marketing attribution.
  *
- *   import { QuickAuth } from '@quickauth/web'
+ *   import { QuickAuth } from '@quickauthin/web'
  *
  *   QuickAuth.init({
  *     onTokenExpiry: async () =>
