@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import { QuickAuth } from '../src/index'
 import { __resetSession } from '../src/auth/session'
+import { __resetWebOTP } from '../src/auth/webotp'
 import { __resetConfig } from '../src/core/config'
 import { __resetAuthEvents } from '../src/core/events'
 import { storage } from '../src/core/storage'
@@ -66,7 +67,86 @@ export function resetSdk(): void {
   __resetTokenManager()
   __resetAuthEvents()
   __resetSession()
+  __resetWebOTP()
   storage.purge()
+}
+
+/** Let queued microtasks and already-resolved promises run to completion. */
+export function flush(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0))
+}
+
+interface WebOTPRequest {
+  signal?: AbortSignal
+  aborted: boolean
+  /** Deliver a code, as the browser would when the SMS arrives. */
+  deliver: (code: string) => void
+}
+
+export interface WebOTPMock {
+  /** Every `navigator.credentials.get({ otp })` call, oldest first. */
+  requests: WebOTPRequest[]
+  /** Requests that are still live (not aborted). */
+  live: () => WebOTPRequest[]
+  restore: () => void
+}
+
+/**
+ * Stand in for the WebOTP API. `navigator.credentials.get` returns a promise
+ * the test resolves by hand, so we can assert on arming, tear-down and
+ * ordering rather than waiting for a real SMS.
+ */
+export function mockWebOTP(): WebOTPMock {
+  const originalCreds = Object.getOwnPropertyDescriptor(navigator, 'credentials')
+  const hadOTPCredential = 'OTPCredential' in window
+  const originalOTPCredential = (window as unknown as { OTPCredential?: unknown })
+    .OTPCredential
+
+  Object.defineProperty(window, 'OTPCredential', {
+    value: function OTPCredential() {},
+    configurable: true,
+    writable: true,
+  })
+
+  const requests: WebOTPRequest[] = []
+  const get = vi.fn(
+    (req: { otp: { transport: string[] }; signal?: AbortSignal }) =>
+      new Promise<{ code: string } | null>((resolve, reject) => {
+        const entry: WebOTPRequest = {
+          signal: req.signal,
+          aborted: false,
+          deliver: (code: string) => resolve({ code }),
+        }
+        requests.push(entry)
+        req.signal?.addEventListener('abort', () => {
+          entry.aborted = true
+          reject(new Error('AbortError'))
+        })
+      }),
+  )
+
+  Object.defineProperty(navigator, 'credentials', {
+    value: { get },
+    configurable: true,
+  })
+
+  return {
+    requests,
+    live: () => requests.filter((r) => !r.aborted),
+    restore(): void {
+      if (originalCreds) {
+        Object.defineProperty(navigator, 'credentials', originalCreds)
+      } else {
+        delete (navigator as unknown as { credentials?: unknown }).credentials
+      }
+      if (hadOTPCredential) {
+        ;(window as unknown as { OTPCredential?: unknown }).OTPCredential =
+          originalOTPCredential
+      } else {
+        delete (window as unknown as { OTPCredential?: unknown }).OTPCredential
+      }
+    },
+  }
 }
 
 export function setUrl(href: string): void {

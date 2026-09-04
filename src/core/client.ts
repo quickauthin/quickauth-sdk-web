@@ -1,4 +1,5 @@
 import type { QueuedRequest } from '../types'
+import { SDK_CLIENT_HEADER } from '../version'
 import { getConfig } from './config'
 import { consent } from './consent'
 import { storage } from './storage'
@@ -74,7 +75,7 @@ async function rawPost<T>(
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
           'Idempotency-Key': idempotencyKey,
-          'X-QA-SDK': 'web/0.1.0',
+          'X-QA-SDK': SDK_CLIENT_HEADER,
         },
         body: JSON.stringify(body ?? {}),
         signal: options.signal,

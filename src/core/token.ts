@@ -1,3 +1,4 @@
+import { SDK_CLIENT_HEADER } from '../version'
 import { getConfig } from './config'
 
 /**
@@ -67,7 +68,7 @@ async function mintViaUnsafe(): Promise<string> {
       'Content-Type': 'application/json',
       'X-Client-Id': cfg.unsafe.directClientId,
       'X-Client-Secret': cfg.unsafe.directClientSecret,
-      'X-QA-SDK': 'web/0.1.0',
+      'X-QA-SDK': SDK_CLIENT_HEADER,
     },
     body: JSON.stringify({}),
   })

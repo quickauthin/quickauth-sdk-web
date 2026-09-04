@@ -74,8 +74,10 @@ export type AuthEventHandler = (event: AuthEvent) => void
  * Calling {@code initiate()} again resets the state machine.
  *
  * - {@code OTP_SENT} — backend dispatched an OTP. Render the input.
- * - {@code OTP_AUTO_READ} — browser WebOTP API auto-read the SMS. Pre-fill
- *   the input. The SDK does NOT auto-submit; merchant decides whether to.
+ * - {@code OTP_AUTO_READ} — the SMS code was read automatically (browser
+ *   WebOTP API, or fed in via {@code publishAutoReadCode}). Pre-fill the
+ *   input. The SDK only submits it for you when the attempt was started with
+ *   {@code autoSubmit: true}.
  * - {@code VERIFIED} — user is authenticated. Covers both fresh OTP success
  *   and silent device-trust re-auth (no OTP was sent). Forward
  *   {@code requestId} to your backend.
@@ -96,6 +98,23 @@ export interface InitiateOptions {
   phone: string
   /** Delivery channel preference. Server picks if omitted or 'auto'. */
   channel?: OTPChannel
+  /**
+   * Verify an auto-read code without waiting for the user to press anything.
+   *
+   * OFF by default: submitting on the merchant's behalf consumes one of the
+   * user's verification attempts, so it is opted into, not out of.
+   *
+   * At most ONE auto-submit happens per {@code initiate()} — a one-shot latch.
+   * A code can reach the SDK more than once (an SMS and a WhatsApp copy of the
+   * same message, or WebOTP plus your own
+   * {@link publishAutoReadCode}); the second submission would verify a code
+   * the server has already consumed and surface as a failure arriving after a
+   * success.
+   *
+   * The setting belongs to the attempt, and {@code resendOtp()} carries it
+   * forward rather than reverting to the default.
+   */
+  autoSubmit?: boolean
 }
 
 export interface ResetOptions {

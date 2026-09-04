@@ -81,7 +81,10 @@ export function isConfigured(): boolean {
   return current !== null
 }
 
-/** Test-only — clears the resolved config so each test starts cold. */
+/**
+ * Clears the resolved config, returning the SDK to its pre-init state.
+ * Backs `QuickAuth.reset()`; also used by tests to start cold.
+ */
 export function __resetConfig(): void {
   current = null
 }

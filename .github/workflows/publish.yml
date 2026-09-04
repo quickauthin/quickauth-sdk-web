@@ -73,6 +73,13 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Verify dist matches package.json
+        # Belt and braces: `npm publish` runs the same check via
+        # prepublishOnly, but failing here gives a clearer signal than a
+        # failure inside the publish step. The 1.1.0 tarball shipped a v0.1.0
+        # build because nothing verified the built files before publishing.
+        run: npm run verify:dist
+
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -98,9 +105,9 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "## ✅ Published @quickauth/web@${{ inputs.version }}"
+            echo "## ✅ Published @quickauthin/web@${{ inputs.version }}"
             echo ""
-            echo "- npm: https://www.npmjs.com/package/@quickauth/web/v/${{ inputs.version }}"
+            echo "- npm: https://www.npmjs.com/package/@quickauthin/web/v/${{ inputs.version }}"
             echo "- Tag: \`v${{ inputs.version }}\`"
-            echo "- Install: \`npm install @quickauth/web@${{ inputs.version }}\`"
+            echo "- Install: \`npm install @quickauthin/web@${{ inputs.version }}\`"
           } >> $GITHUB_STEP_SUMMARY
