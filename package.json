@@ -49,13 +49,13 @@
     "prepublishOnly": "npm run build && npm test && npm run verify:dist",
     "size": "du -h dist/index.esm.js"
   },
-  "peerDependencies": {},
-  "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "eslint": "^9.39.5",
     "happy-dom": "^14.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
+    "typescript-eslint": "^8.69.0",
     "vitest": "^1.4.0"
   },
   "engines": {
