@@ -26,7 +26,6 @@ describe('consent gate', () => {
     expect(mock.fn).toHaveBeenCalledTimes(0)
 
     QuickAuth.consent.set(true)
-    // Wait a tick for the async flush.
     await new Promise((r) => setTimeout(r, 10))
 
     expect(mock.fn).toHaveBeenCalledTimes(1)
@@ -40,15 +39,12 @@ describe('consent gate', () => {
     initSdk({ fetch: mock.fn as unknown as typeof fetch, consent: false })
 
     await QuickAuth.attribution.trackConversion({ event: 'signup' })
-    QuickAuth.consent.set(false) // no-op (already false)
-    QuickAuth.consent.set(true) // grant — flushes
-    QuickAuth.consent.set(false) // revoke — should purge
+    QuickAuth.consent.set(false)
+    QuickAuth.consent.set(true)
+    QuickAuth.consent.set(false)
 
     expect(QuickAuth.consent.get()).toBe(false)
-    // After revoke, no further calls should be queued.
     await QuickAuth.attribution.trackConversion({ event: 'login' })
-    // The first call may have flushed before revoke; ensure the second one
-    // didn't sneak through.
     const calls = mock.fn.mock.calls.map(
       (c) => JSON.parse((c[1] as RequestInit).body as string).event,
     )

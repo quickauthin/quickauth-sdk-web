@@ -1,4 +1,4 @@
-# @quickauthin/web
+# @quick-auth/web-sdk
 
 Tiny TypeScript SDK for [QuickAuth](https://quickauth.in) — phone OTP
 authentication and Meta WhatsApp marketing attribution for web apps.
@@ -11,52 +11,76 @@ authentication and Meta WhatsApp marketing attribution for web apps.
 - Native **WebOTP** auto-read, armed for you, with opt-in auto-submit
   (autocomplete fallback for iOS/Firefox)
 - Idempotent POSTs with exponential-backoff retry and offline queue
-- **Token-based auth** — short-lived JWTs minted by your backend, never
-  embed your client secret in the browser
+- **Publishable-key auth** — drop in a `pk_live_…` key, no backend needed;
+  or use short-lived JWTs minted by your backend. Never embed your client
+  secret in the browser
 
 ---
 
 ## Install
 
 ```bash
-npm install @quickauthin/web
+npm install @quick-auth/web-sdk
 # or
-pnpm add @quickauthin/web
+pnpm add @quick-auth/web-sdk
 # or
-yarn add @quickauthin/web
+yarn add @quick-auth/web-sdk
 ```
 
 Or load directly via UMD/IIFE bundle:
 
 ```html
-<script src="https://unpkg.com/@quickauthin/web/dist/index.global.js"></script>
+<script src="https://unpkg.com/@quick-auth/web-sdk/dist/index.global.js"></script>
 <script>
   // The global is flat: window.QuickAuth.init, not window.QuickAuth.QuickAuth.init.
   QuickAuth.init({
-    onTokenExpiry: async () =>
-      (await fetch('/api/quickauth-token').then(r => r.json())).sessionToken,
+    publishableKey: 'pk_live_…',
     onAuthEvent: (event) => console.log(event.type, event),
   })
 </script>
 ```
 
-> **1.1.0 users:** that build's global was double-nested
-> (`window.QuickAuth.QuickAuth`). It is flat from 1.2.0 on. Drop the extra
-> `.QuickAuth` when you upgrade.
+> **Upgrading from `@quickauth/web` 1.1.0:** that build's global was
+> double-nested (`window.QuickAuth.QuickAuth`). In `@quick-auth/web-sdk` it is
+> flat — drop the extra `.QuickAuth`.
 
-Get your `client_id` + `client_secret` from the
+Get your keys from the
 [QuickAuth dashboard → Developers → Keys](https://app.quickauth.in/settings/api).
 
 ---
 
-## Auth model — short-lived sessionTokens
+## Auth model
 
-The Web SDK uses the same pattern as Twilio Verify, Stripe Elements, and
-every modern client SDK: your **backend** mints a 10-minute JWT (a
-`sessionToken`), and the SDK uses that JWT as a Bearer token. Your
-`client_secret` **never** leaves your server.
+Pick **one** auth mode in `init()`:
 
-### 1. Add a token-mint endpoint to your backend (Express example)
+| Mode | What ships in the page | Backend needed? | Use it for |
+| --- | --- | --- | --- |
+| `publishableKey` | `pk_live_…` (safe to ship) | only to confirm logins | most apps (**recommended**) |
+| `onTokenExpiry` | short-lived session JWT | yes, mints tokens | apps that want per-user gating of OTP sends |
+| `unsafe` | `client_secret` (**never ship**) | no | trusted, non-browser builds only |
+
+### Publishable key (recommended)
+
+```js
+import { QuickAuth } from '@quick-auth/web-sdk'
+
+QuickAuth.init({
+  publishableKey: 'pk_live_…', // dashboard → your app → Keys
+})
+```
+
+A publishable key is designed to ship in the page: it only allows the SDK's
+own calls (OTP send/verify and attribution), is meant for your registered
+origins (add them under **Settings → Allowed Origins**), and is rate-limited. The SDK sends it as an
+`X-QuickAuth-Key` header on every request — no token minting, no token cache,
+and a `401` is returned to you as an `ERROR` rather than retried.
+
+### Session tokens (`onTokenExpiry`)
+
+Your **backend** mints a 10-minute JWT (a `sessionToken`), and the SDK uses
+that JWT as a Bearer token. Your `client_secret` **never** leaves your server.
+
+#### 1. Add a token-mint endpoint to your backend (Express example)
 
 ```js
 app.get('/api/quickauth-token', requireAuth, async (req, res) => {
@@ -74,10 +98,10 @@ app.get('/api/quickauth-token', requireAuth, async (req, res) => {
 The same pattern works in any backend — Next.js Route Handlers, FastAPI,
 Rails, Laravel, Cloudflare Workers, etc.
 
-### 2. Wire the SDK to your endpoint
+#### 2. Wire the SDK to your endpoint
 
 ```js
-import { QuickAuth } from '@quickauthin/web'
+import { QuickAuth } from '@quick-auth/web-sdk'
 
 QuickAuth.init({
   onTokenExpiry: async () =>
@@ -104,11 +128,10 @@ The flow is **headless and event-driven**: you call three methods, and every
 outcome arrives on one handler. There is no return value to branch on.
 
 ```ts
-import { QuickAuth } from '@quickauthin/web'
+import { QuickAuth } from '@quick-auth/web-sdk'
 
 QuickAuth.init({
-  onTokenExpiry: async () =>
-    (await fetch('/api/quickauth-token').then(r => r.json())).sessionToken,
+  publishableKey: 'pk_live_…',
 
   onAuthEvent: (event) => {
     switch (event.type) {
@@ -147,21 +170,93 @@ trusted, `initiate()` emits `VERIFIED` and no OTP screen is needed at all.
 
 | Option           | Type                                    | Default                      |
 | ---------------- | --------------------------------------- | ---------------------------- |
-| `onTokenExpiry`  | `() => Promise<string>` (recommended)   | —                            |
+| `publishableKey` | `string` (recommended)                  | —                            |
+| `onTokenExpiry`  | `() => Promise<string>`                 | —                            |
 | `initialToken`   | `string`                                | —                            |
 | `unsafe`         | `{ directClientId, directClientSecret }`| — (NOT RECOMMENDED)          |
 | `apiBaseUrl`     | `string`                                | `https://api.quickauth.in`   |
 | `consent`        | `boolean`                               | `false`                      |
 | `storagePrefix`  | `string`                                | `qa_`                        |
 | `maxRetries`     | `number`                                | `3`                          |
+| `requestTimeoutMs` | `number` (0 disables)                 | `15000`                      |
+| `debug`          | `boolean`                               | `false`                      |
+| `silent`         | `boolean`                               | `false`                      |
 | `fetch`          | `typeof fetch`                          | global `fetch`               |
 | `onAuthEvent`    | `(event: AuthEvent) => void`            | —                            |
 
-You **must** provide one of: `onTokenExpiry`, `initialToken`, or `unsafe`.
-Otherwise `init()` throws `Error("init() requires an onTokenExpiry callback")`.
+You **must** provide one of: `publishableKey` (recommended), `onTokenExpiry`,
+`initialToken`, or `unsafe`. `publishableKey` cannot be combined with any of
+the others, and `onTokenExpiry` cannot be combined with `unsafe`. Invalid
+options throw straight away:
 
-If you already have a fresh token at init time (e.g. server-rendered into
-the HTML), pass it as `initialToken` to skip the first network round-trip.
+- `[QuickAuth] init() requires one of: publishableKey (recommended), onTokenExpiry, initialToken, or unsafe.{directClientId, directClientSecret}`
+- `[QuickAuth] init() accepts only one auth mode: publishableKey cannot be combined with onTokenExpiry, initialToken or unsafe`
+- `[QuickAuth] init() accepts only one auth mode: pass either onTokenExpiry or unsafe — not both`
+- `[QuickAuth] init() publishableKey must be a string`
+- `[QuickAuth] init() unsafe needs both directClientId and directClientSecret`
+- `[QuickAuth] init() onTokenExpiry must be a function that returns a session token`
+
+`init()` returns a promise that settles once anything queued for consent has
+been sent. Awaiting it is optional, and it never rejects.
+
+In session-token mode, if you already have a fresh token at init time (e.g.
+server-rendered into the HTML), pass it as `initialToken` to skip the first
+network round-trip.
+
+### Errors
+
+Failures arrive as an `ERROR` event (and the method's promise rejects with a
+`QuickAuthError` carrying the same fields):
+
+```ts
+{
+  type: 'ERROR',
+  code: 'CLIENT_ERROR',                       // SDK category — table below
+  message: '[QuickAuth] HTTP 400: phone: phone is required',  // includes the server's message
+  errorCode: 'INVALID_REQUEST',               // the server's reason, when it sent one
+  status: 400,                                // HTTP status, when the server answered
+  retryAfter: 120,                            // seconds to wait (rate limits)
+  requestId: 'f3c1…',                         // quote this to QuickAuth support
+}
+```
+
+| `code`          | Meaning                                                   | Retried by the SDK |
+| --------------- | --------------------------------------------------------- | ------------------ |
+| `CLIENT_ERROR`  | 4xx — the request was rejected; see `errorCode`           | no                 |
+| `RATE_LIMITED`  | 429 — wait `retryAfter` seconds before trying again       | no                 |
+| `SERVER_ERROR`  | 5xx, or a 2xx the SDK cannot use (`errorCode: 'INVALID_RESPONSE'`) | 5xx yes, `INVALID_RESPONSE` no |
+| `NETWORK_ERROR` | offline, DNS failure, blocked by CORS (Allowed Origins), or the connection dropped mid-response | yes, `maxRetries` |
+| `TIMEOUT`       | no complete response within `requestTimeoutMs` (the body read counts) | yes, `maxRetries`  |
+| `TOKEN_ERROR`   | `onTokenExpiry` threw or returned nothing, or the unsafe mint was rejected | no |
+| `UNKNOWN_ERROR` | anything else                                             | no                 |
+
+A wrong code is not an error — it is `OTP_FAILED`, and the attempt stays open.
+
+`INVALID_RESPONSE` means a successful response that is not the QuickAuth API's:
+an HTML page (a public Wi-Fi login page, or a wrong `apiBaseUrl`), or an
+initiate without `sessionId` / a verify without `state` or `requestId`. It is
+not retried, because the request may already have sent an SMS:
+
+```ts
+{
+  type: 'ERROR',
+  code: 'SERVER_ERROR',
+  errorCode: 'INVALID_RESPONSE',
+  status: 200,
+  message: '[QuickAuth] Unexpected response from the server (HTTP 200, text/html) for /v1/sdk/auth/initiate — not the QuickAuth API. Check apiBaseUrl, or the network may be behind a login page (public Wi-Fi).',
+}
+```
+
+`retryAfter` is read from the response body, or from the `Retry-After` header
+when the API exposes it to the browser.
+
+### Debug logging
+
+`init({ debug: true })` logs every request, response, retry, token refresh and
+auth event to the console, prefixed `[QuickAuth]`. OTP codes, tokens and
+secrets are masked. Leave it off in production. `silent: true` does the
+opposite: it hides the SDK's own warnings (e.g. the `unsafe` warning) and
+errors.
 
 ### Consent (DPDP / GDPR)
 
@@ -171,20 +266,26 @@ the HTML), pass it as `initialToken` to skip the first network round-trip.
 > your privacy notice.
 
 ```ts
-QuickAuth.consent.set(true)         // grant — flushes queued events
-QuickAuth.consent.set(false)        // revoke — purges queue + cached attribution
+await QuickAuth.consent.set(true)   // grant — sends everything queued
+await QuickAuth.consent.set(false)  // revoke — drops the queue + stored attribution
 QuickAuth.consent.get()             // boolean
+QuickAuth.consent.pendingCount()    // requests waiting for consent
 QuickAuth.consent.onChange((v) => { /* ... */ })
 ```
 
-While consent is `false`, conversion events are queued in `localStorage` and
-replayed automatically when consent is granted. Revoking consent clears the
-queue, the device fingerprint cache, and any stored `qa_clid`.
+The user's choice is saved in `localStorage` and **wins over
+`init({ consent })`** on later page loads, so passing `consent: false` on every
+load never wipes out a "yes" (same as the React Native and Flutter SDKs).
+`init({ consent })` only applies when nothing has been saved yet.
+
+While consent is `false`, `captureLaunch()` and conversion events are queued
+and sent automatically when consent is granted. Revoking consent clears the
+queue and any stored `qa_clid`.
 
 ### Top-level facade
 
 ```ts
-QuickAuth.init(options)              // configure; safe to call again to reconfigure
+QuickAuth.init(options)              // configure (returns a promise); safe to call again
 QuickAuth.isInitialized              // boolean
 QuickAuth.config                     // resolved config (throws before init)
 QuickAuth.version                    // semver of this build
@@ -204,7 +305,7 @@ initialised (including sign-out), use `QuickAuth.auth.reset({ forgetDevice: true
 ### Authentication
 
 ```ts
-QuickAuth.auth.initiate({ phone, channel, autoSubmit })  // channel: 'sms' | 'whatsapp' | 'auto'
+QuickAuth.auth.initiate({ phone, channel, autoSubmit })  // E.164, surrounding spaces trimmed
 QuickAuth.auth.submitOtp(code)                           // 4–8 digits
 QuickAuth.auth.resendOtp()                               // no arguments — see below
 QuickAuth.auth.publishAutoReadCode(code)                 // feed a code in yourself
@@ -245,10 +346,14 @@ await QuickAuth.auth.initiate({ phone, autoSubmit: true })
   `publishAutoReadCode`); the second submission would verify a code the server
   has already consumed and would surface as a failure arriving *after* a
   success.
-- The WebOTP request is re-armed on every attempt and torn down on `reset()`,
-  on supersede, and once the attempt is verified —
-  `navigator.credentials.get()` resolves once and is then spent, and a browser
-  honours only one outstanding request.
+- One WebOTP request is shared by everything listening. A pending request is
+  kept across a resend or a new attempt (aborting and re-issuing it makes
+  Chrome on Android show the consent prompt for a request that no longer
+  delivers); a new one is armed only once the previous one has resolved. It is
+  torn down on `reset()` and once the attempt is verified.
+- **The SMS must end with an origin-bound line** or the browser ignores it:
+  `@shop.example.com #123456` — your page's host, then the code. Configure it in
+  your OTP SMS template; it is the browser's rule, not the SDK's.
 - `publishAutoReadCode(code)` feeds a code in from anywhere else (your own SMS
   webhook, a paste handler, a native shell). It behaves exactly as a WebOTP read
   does, including the one-shot latch.
@@ -276,7 +381,13 @@ await QuickAuth.attribution.trackConversion({
 })
 
 QuickAuth.attribution.getStored() // most recent attribution snapshot
+QuickAuth.attribution.qaClid()    // click id of the most recent WhatsApp click, or null
 ```
+
+`trackConversion()` sends `{ event, value, currency, qa_clid?, metadata? }`, the
+same body as the React Native and Flutter SDKs. It is best-effort: a network
+failure is logged (with `debug: true`) instead of rejecting, so a conversion can
+never break your page. A missing event name still throws.
 
 `captureLaunch()` looks for a `?qa_clid=...` query parameter (set by your
 WhatsApp template CTA URL). When found and consent is granted, it sends an
@@ -307,8 +418,8 @@ QuickAuth.init({
 > prints a `console.warn("[QuickAuth] UNSAFE: client_secret embedded in
 > client...")` on init as a reminder.
 >
-> **Do not use this in browser apps.** Use the `onTokenExpiry` pattern
-> instead.
+> **Do not use this in browser apps.** Use `publishableKey` (or the
+> `onTokenExpiry` pattern) instead.
 
 ---
 
@@ -323,9 +434,12 @@ QuickAuth.init({
 | Firefox (all)        | ✅              | ⚠️ autocomplete fallback only | ✅          |
 | Desktop Chrome/Edge  | ✅              | ❌ (no WebOTP on desktop)     | ✅          |
 
-The SDK **never** throws on unsupported browsers — it gracefully falls back to
-the platform autocomplete attribute, which is enough for iOS QuickType and
-most Android keyboards.
+WebOTP needs a secure page (HTTPS, or `localhost` while developing) and the
+origin-bound SMS line above. The SDK **never** throws on unsupported browsers —
+it falls back to the `autocomplete="one-time-code"` attribute, so iOS QuickType
+and most Android keyboards offer the code. That fallback fills the input but
+does not emit `OTP_AUTO_READ`, so call `submitOtp()` from your input handler
+there.
 
 ---
 
@@ -340,11 +454,13 @@ most Android keyboards.
 | `dist/index.global.js` | IIFE / UMD-ish — exposes `window.QuickAuth` |
 | `dist/index.d.ts`      | TypeScript declarations                  |
 
-Target bundle size: **< 15 KB gzipped**.
+Bundle size: **~9 KB gzipped** (target < 15 KB).
 
 The version is single-sourced from `package.json`: it is injected at build time
-(`__QA_SDK_VERSION__`) and read by `QuickAuth.version` and the `X-QA-SDK`
-request header. There is no second copy to update.
+(`__QA_SDK_VERSION__`) and read by `QuickAuth.version` and `deviceInfo.sdk`.
+There is no second copy to update. (Unlike the React Native and Flutter SDKs,
+the web SDK sends no `X-QA-SDK` header — browsers would need the API's CORS
+policy to allow it.)
 
 `npm publish` runs `prepublishOnly` — build, tests, then
 `scripts/check-dist.mjs`, which refuses to publish a `dist/` that does not carry
@@ -356,24 +472,58 @@ build; this is the stop.)
 ## Backend setup
 
 1. Sign in at <https://app.quickauth.in>.
-2. Create a project and copy your `client_id` + `client_secret` from
+2. Create a project and copy your publishable key (`pk_live_…`) from
    **Developers → Keys**.
-3. Add a `/api/quickauth-token` route to your backend (5-line example
-   above) that calls `POST /v1/sdk/session` with `X-Client-Id` +
-   `X-Client-Secret`.
-4. Wire `QuickAuth.init({ onTokenExpiry })` in your frontend.
+3. Add your domain to the allowlist under **Settings → Allowed Origins** —
+   the publishable key only works from these origins.
+4. Wire `QuickAuth.init({ publishableKey })` in your frontend.
+   (Session-token mode instead: add a `/api/quickauth-token` route that calls
+   `POST /v1/sdk/session` with `X-Client-Id` + `X-Client-Secret`, and wire
+   `QuickAuth.init({ onTokenExpiry })`.)
 5. Configure SMS / WhatsApp templates under **Templates → OTP**.
-6. Add your domain to the allowlist under **Settings → Allowed Origins**.
-7. Mount your WhatsApp marketing CTA URLs through QuickAuth's link shortener
+6. Mount your WhatsApp marketing CTA URLs through QuickAuth's link shortener
    to receive a `qa_clid` on every click.
 
 ---
 
+## Device info
+
+With consent granted, `initiate()`, `submitOtp()` and `captureLaunch()` attach
+a `deviceInfo` block (audit metadata — never used for OneTap). Without consent
+it is not sent at all. The first six fields match the React Native and Flutter
+SDKs, so the backend reads every platform the same way:
+
+```jsonc
+{
+  "platform": "web",
+  "osVersion": "Android 14",           // from User-Agent Client Hints when available
+  "locale": "en-IN",
+  "timeZoneOffsetMinutes": 330,
+  "appId": "shop.example.com",         // location.host
+  "sdk": "web/1.0.1",
+  // web-only
+  "osName": "Android",
+  "browserName": "Chrome",
+  "browserVersion": "141.0.7390.55",
+  "mobile": true,
+  "timezone": "Asia/Kolkata",
+  "userAgent": "Mozilla/5.0 (…)",
+  "screen": { "width": 412, "height": 915, "colorDepth": 24, "pixelRatio": 2.625 }
+}
+```
+
+On Chromium browsers the exact OS and browser versions come from User-Agent
+Client Hints (which tell Windows 11 from 10 and give the real macOS version);
+elsewhere they are parsed from the User-Agent string. Fields a browser does not
+expose are omitted. Client hints are awaited for at most 250 ms, so they never
+hold up a login.
+
 ## Privacy notes
 
-- `userAgent`, `screen`, `platform` are **hashed locally** via SubtleCrypto
-  SHA-256 before leaving the device. Only the hash and three low-entropy hints
-  (timezone, locale, platform) are sent.
+- The attribution **fingerprint** hashes `userAgent`, `screen`, `platform`,
+  timezone and locale **locally** via SubtleCrypto SHA-256; only the hash and
+  three low-entropy hints (timezone, locale, platform) are sent with it.
+- The `deviceInfo` block above is sent in clear, and only with consent.
 - Phone numbers are sent only to QuickAuth's `/v1/sdk/auth/*` endpoints and
   are stored encrypted at rest.
 - The SDK never reads cookies, never sets third-party cookies, and respects

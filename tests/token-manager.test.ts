@@ -8,7 +8,6 @@ describe('decodeJwtExp', () => {
     const token = fakeJwt(120)
     const exp = decodeJwtExp(token)
     expect(exp).not.toBeNull()
-    // Within ~1s of "now + 120s".
     expect(Math.abs((exp ?? 0) - (Date.now() + 120_000))).toBeLessThan(2_000)
   })
 
@@ -48,7 +47,7 @@ describe('TokenManager — onTokenExpiry callback', () => {
     mock.reply({ sessionId: 's1', expiresIn: 1 })
     mock.reply({ sessionId: 's2', expiresIn: 1 })
 
-    const expiringSoon = fakeJwt(10) // 10s remaining — under the 30s buffer
+    const expiringSoon = fakeJwt(10)
     const fresh = fakeJwt(600)
     const onTokenExpiry = vi.fn(async () => fresh)
 
@@ -62,7 +61,6 @@ describe('TokenManager — onTokenExpiry callback', () => {
     })
 
     await QuickAuth.auth.initiate({ phone: '+919876543210' })
-    // Initial token expires in 10s — under the 30s buffer — should refresh.
     expect(onTokenExpiry).toHaveBeenCalledTimes(1)
     const headers = (mock.fn.mock.calls[0]![1] as RequestInit)
       .headers as Record<string, string>
@@ -88,14 +86,13 @@ describe('TokenManager — onTokenExpiry callback', () => {
 
     await QuickAuth.auth.initiate({ phone: '+919876543210' })
     await QuickAuth.auth.initiate({ phone: '+919876543210' })
-    // Both calls share the still-fresh initial token — no refresh needed.
     expect(onTokenExpiry).not.toHaveBeenCalled()
   })
 
   it('attaches Bearer token header on every POST', async () => {
     const mock = makeMockFetch()
     mock.reply({ sessionId: 's1', expiresIn: 1 })
-    mock.reply({ jwt: 'j', expiresIn: 1 })
+    mock.reply({ state: 'OTP_FAILED', verified: false, requestId: 'r1', message: 'Incorrect code' })
     const token = fakeJwt(600)
 
     QuickAuth.init({
@@ -135,11 +132,9 @@ describe('TokenManager — onTokenExpiry callback', () => {
       onTokenExpiry,
     })
 
-    // Fire 5 concurrent calls — only one refresh should be in flight.
     const calls = Array.from({ length: 5 }, () =>
       QuickAuth.auth.initiate({ phone: '+919876543210' }),
     )
-    // Yield once so all callers register their listeners on the in-flight refresh.
     await new Promise((r) => setTimeout(r, 0))
     expect(onTokenExpiry).toHaveBeenCalledTimes(1)
 
@@ -188,9 +183,7 @@ describe('TokenManager — unsafe direct credentials', () => {
   it('mints via /v1/sdk/session and prints a console warning', async () => {
     const mock = makeMockFetch()
     const minted = fakeJwt(600)
-    // First call: /v1/sdk/session minting response.
     mock.reply({ sessionToken: minted })
-    // Second call: the actual startOTP endpoint.
     mock.reply({ sessionId: 's', expiresIn: 1 })
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})

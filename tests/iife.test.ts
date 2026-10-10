@@ -1,21 +1,3 @@
-/**
- * Smoke test for the script-tag bundle.
- *
- * 1.1.0 shipped an IIFE whose global was double-nested — `globalName:
- * 'QuickAuth'` plus a named export called `QuickAuth` meant every
- * `<script>` user had to write `window.QuickAuth.QuickAuth.init(...)`, and
- * nothing in the repo ever loaded the built file to notice.
- *
- * This loads the real dist/index.global.js the way a browser does. Indirect
- * eval runs in global, sloppy-mode scope, so the bundle's top-level `var
- * QuickAuth` becomes a property of `window` exactly as it would from a
- * script tag.
- *
- * It is skipped (loudly) when dist/ has not been built, so a plain
- * `npm test` on a fresh clone still works. It always runs where it matters:
- * `prepublishOnly` builds first, and so does the publish workflow.
- */
-
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -38,7 +20,6 @@ describe.skipIf(!built)('dist/index.global.js (script-tag build)', () => {
   function loadBundle(): Record<string, unknown> {
     delete globalScope.QuickAuth
     const code = readFileSync(bundlePath, 'utf8')
-    // Indirect eval → global scope, so `var QuickAuth` lands on window.
     ;(0, eval)(code)
     return globalScope.QuickAuth as Record<string, unknown>
   }
@@ -51,7 +32,6 @@ describe.skipIf(!built)('dist/index.global.js (script-tag build)', () => {
       'object',
     )
     expect(typeof QuickAuth.init).toBe('function')
-    // The bug: the namespace nested inside itself.
     expect(QuickAuth.QuickAuth).toBeUndefined()
   })
 
@@ -75,8 +55,8 @@ describe.skipIf(!built)('dist/index.global.js (script-tag build)', () => {
   it('backs every QuickAuth.* path used by examples/basic.html', () => {
     const QuickAuth = loadBundle()
     const html = readFileSync(join(root, 'examples/basic.html'), 'utf8')
-      .replace(/<!--[\s\S]*?-->/g, '') // HTML comments name the OLD nesting
-      .replace(/^\s*\/\/.*$/gm, '') // JS line comments
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/^\s*\/\/.*$/gm, '')
 
     const paths = new Set(
       Array.from(
@@ -84,8 +64,6 @@ describe.skipIf(!built)('dist/index.global.js (script-tag build)', () => {
         (m) => m[1]!,
       ),
     )
-    // The example is the first thing an integrator copies; it documented
-    // startOTP/verifyOTP for two releases after those were removed.
     expect(paths.size).toBeGreaterThan(4)
 
     for (const path of paths) {
@@ -103,8 +81,6 @@ describe.skipIf(!built)('dist/index.global.js (script-tag build)', () => {
 
   it('does not throw while evaluating the getters it exposes', () => {
     const QuickAuth = loadBundle()
-    // `isInitialized` must be readable before init(); `config` must throw a
-    // QuickAuth error rather than something unrecognisable.
     expect(QuickAuth.isInitialized).toBe(false)
     expect(() => QuickAuth.config).toThrow(/QuickAuth/)
   })

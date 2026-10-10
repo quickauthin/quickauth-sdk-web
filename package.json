@@ -1,6 +1,6 @@
 {
-  "name": "@quickauthin/web",
-  "version": "1.2.0",
+  "name": "@quick-auth/web-sdk",
+  "version": "1.0.0",
   "description": "QuickAuth Web SDK — phone OTP authentication and Meta WhatsApp marketing attribution",
   "license": "MIT",
   "author": "QuickAuth",
@@ -35,7 +35,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "sideEffects": false,
   "scripts": {
@@ -46,8 +47,11 @@
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "verify:dist": "node scripts/check-dist.mjs",
-    "prepublishOnly": "npm run build && npm test && npm run verify:dist",
-    "size": "du -h dist/index.esm.js"
+    "prepublishOnly": "npm run typecheck && npm test && npm run build && npm run verify:dist",
+    "size": "du -h dist/index.esm.js",
+    "e2e": "node e2e/live-otp-test.js",
+    "e2e:offline": "node e2e/live-otp-test.js --offline",
+    "e2e:browser": "node e2e/server.js"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

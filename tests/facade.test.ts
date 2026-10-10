@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import pkg from '../package.json'
 import { QuickAuth } from '../src/index'
 import type { AuthEvent } from '../src/types'
-import { SDK_CLIENT_HEADER, SDK_VERSION } from '../src/version'
+import { SDK_TAG, SDK_VERSION } from '../src/version'
 import { fakeJwt, flush, initSdk, makeMockFetch, resetSdk } from './_helpers'
 
 describe('facade surface', () => {
@@ -96,10 +96,9 @@ describe('facade surface', () => {
       onTokenExpiry: provider,
     })
 
-    // Same object the SDK itself uses — not a snapshot taken at init.
     expect(QuickAuth.tokenManager).toBe(QuickAuth._internal.tokenManager)
     await expect(QuickAuth.tokenManager.getToken()).resolves.toBe(seeded)
-    expect(provider).not.toHaveBeenCalled() // served from initialToken
+    expect(provider).not.toHaveBeenCalled()
   })
 
   it('tokenManager.getToken drives the configured provider', async () => {
@@ -114,7 +113,6 @@ describe('facade surface', () => {
     await expect(QuickAuth.tokenManager.getToken()).resolves.toBe(minted)
     expect(provider).toHaveBeenCalledTimes(1)
 
-    // Cached — a second read must not re-mint.
     await QuickAuth.tokenManager.getToken()
     expect(provider).toHaveBeenCalledTimes(1)
   })
@@ -135,11 +133,10 @@ describe('version is single-sourced', () => {
   it('QuickAuth.version comes from package.json', () => {
     expect(SDK_VERSION).toBe(pkg.version)
     expect(QuickAuth.version).toBe(pkg.version)
-    // The sentinel means the build-time define did not apply.
     expect(QuickAuth.version).not.toContain('unbuilt')
   })
 
-  it('sends the same version in the X-QA-SDK header', async () => {
+  it('sends no X-QA-SDK header (the API CORS policy does not allow it)', async () => {
     const mock = makeMockFetch()
     mock.reply({ state: 'OTP_SENT', sessionId: 'sess_1', expiresIn: 300 })
     initSdk({ fetch: mock.fn as unknown as typeof fetch, consent: false })
@@ -148,7 +145,18 @@ describe('version is single-sourced', () => {
 
     const [, init] = mock.fn.mock.calls[0] as [string, RequestInit]
     const headers = init.headers as Record<string, string>
-    expect(SDK_CLIENT_HEADER).toBe(`web/${pkg.version}`)
-    expect(headers['X-QA-SDK']).toBe(`web/${pkg.version}`)
+    expect(Object.keys(headers).sort()).toEqual(['Authorization', 'Content-Type', 'Idempotency-Key'])
+  })
+
+  it('also reports the version in deviceInfo.sdk', async () => {
+    const mock = makeMockFetch()
+    mock.reply({ state: 'OTP_SENT', sessionId: 'sess_1', expiresIn: 300 })
+    initSdk({ fetch: mock.fn as unknown as typeof fetch, consent: true })
+
+    await QuickAuth.auth.initiate({ phone: '+919876543210' })
+
+    const [, init] = mock.fn.mock.calls[0] as [string, RequestInit]
+    expect(SDK_TAG).toBe(`web/${pkg.version}`)
+    expect(JSON.parse(init.body as string).deviceInfo.sdk).toBe(`web/${pkg.version}`)
   })
 })

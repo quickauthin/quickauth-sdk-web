@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import { QuickAuth } from '../src/index'
+import { __resetDeviceInfoCache } from '../src/attribution/device'
 import { __resetSession } from '../src/auth/session'
 import { __resetWebOTP } from '../src/auth/webotp'
 import { __resetConfig } from '../src/core/config'
@@ -7,10 +8,6 @@ import { __resetAuthEvents } from '../src/core/events'
 import { storage } from '../src/core/storage'
 import { __resetTokenManager } from '../src/core/token'
 
-/**
- * Build a JWT-shaped string with a custom `exp` (seconds). The signature
- * segment is intentionally fake — the SDK never verifies it (server's job).
- */
 export function fakeJwt(expSecondsFromNow = 600): string {
   const header = { alg: 'HS256', typ: 'JWT' }
   const payload = { exp: Math.floor(Date.now() / 1000) + expSecondsFromNow }
@@ -68,10 +65,10 @@ export function resetSdk(): void {
   __resetAuthEvents()
   __resetSession()
   __resetWebOTP()
+  __resetDeviceInfoCache()
   storage.purge()
 }
 
-/** Let queued microtasks and already-resolved promises run to completion. */
 export function flush(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0))
 }
@@ -79,23 +76,15 @@ export function flush(): Promise<void> {
 interface WebOTPRequest {
   signal?: AbortSignal
   aborted: boolean
-  /** Deliver a code, as the browser would when the SMS arrives. */
   deliver: (code: string) => void
 }
 
 export interface WebOTPMock {
-  /** Every `navigator.credentials.get({ otp })` call, oldest first. */
   requests: WebOTPRequest[]
-  /** Requests that are still live (not aborted). */
   live: () => WebOTPRequest[]
   restore: () => void
 }
 
-/**
- * Stand in for the WebOTP API. `navigator.credentials.get` returns a promise
- * the test resolves by hand, so we can assert on arming, tear-down and
- * ordering rather than waiting for a real SMS.
- */
 export function mockWebOTP(): WebOTPMock {
   const originalCreds = Object.getOwnPropertyDescriptor(navigator, 'credentials')
   const hadOTPCredential = 'OTPCredential' in window

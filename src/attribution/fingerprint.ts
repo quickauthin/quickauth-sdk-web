@@ -1,16 +1,10 @@
-import type { DeviceInfo, FingerprintEnvelope } from '../types'
-import { collectDeviceInfo } from './device'
+import type { BrowserSignals, FingerprintEnvelope } from '../types'
+import { collectBrowserSignals } from './device'
 
-/**
- * Build an opaque fingerprint envelope. The full device payload is hashed via
- * SubtleCrypto SHA-256 and only the hash + a tiny set of low-entropy hints
- * (timezone, locale, platform) are returned. Backend joins on the hash for
- * deferred-deep-link match without ever seeing the raw UA.
- */
 export async function buildFingerprint(
-  device?: DeviceInfo,
+  device?: BrowserSignals,
 ): Promise<FingerprintEnvelope> {
-  const info = device ?? collectDeviceInfo()
+  const info = device ?? collectBrowserSignals()
   const canonical = [
     info.timezone,
     info.locale,
@@ -40,7 +34,6 @@ async function sha256(input: string): Promise<string> {
       .map((b) => b.toString(16).padStart(2, '0'))
       .join('')
   }
-  // Last-ditch fallback — non-cryptographic but stable. Still opaque to the user.
   let h1 = 0xdeadbeef
   let h2 = 0x41c6ce57
   for (let i = 0; i < input.length; i++) {

@@ -80,16 +80,15 @@
     <h2 style="margin-top: 2rem">Result</h2>
     <pre id="out">awaiting input</pre>
 
-    <!--
-      The IIFE bundle exposes the SDK flat on `window`: QuickAuth.init(...),
-      NOT QuickAuth.QuickAuth.init(...) — the 1.1.0 build was double-nested.
-      Replace the relative src with the CDN URL once the package is published:
-      https://unpkg.com/@quickauthin/web/dist/index.global.js
-    -->
     <script src="../dist/index.global.js"></script>
     <script>
       const $ = (id) => document.getElementById(id)
       const out = $('out')
+      // API failures arrive as an ERROR event; a thrown plain Error is invalid input.
+      const showInputError = (err) => {
+        if (err instanceof QuickAuth.QuickAuthError) return
+        log('Error: ' + (err && err.message ? err.message : err))
+      }
       const log = (msg) => {
         out.textContent =
           typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2)
@@ -97,16 +96,8 @@
 
       QuickAuth.init({
         apiBaseUrl: 'https://api.quickauth.in',
-        // Customer's backend exposes /api/quickauth-token, which calls
-        // POST https://api.quickauth.in/v1/sdk/session with X-Client-Id +
-        // X-Client-Secret and returns { sessionToken, expiresIn }.
-        onTokenExpiry: async () =>
-          (await fetch('/api/quickauth-token').then((r) => r.json()))
-            .sessionToken,
+        publishableKey: 'pk_live_…', // dashboard → your app → Keys
 
-        // ONE handler for the whole lifecycle. Every outcome arrives here —
-        // the methods below return promises, but the events are what you
-        // render from.
         onAuthEvent: (event) => {
           switch (event.type) {
             case 'OTP_SENT':
@@ -116,8 +107,6 @@
               break
 
             case 'OTP_AUTO_READ':
-              // The SDK armed WebOTP inside initiate() — no observeOTP call
-              // is needed to get here.
               $('code').value = event.code
               $('verify').disabled = false
               log({ stage: 'auto-read', code: event.code })
@@ -127,8 +116,6 @@
               $('verify').disabled = true
               $('resend').disabled = true
               log({ stage: 'verified', requestId: event.requestId })
-              // Hand requestId to your backend, which confirms it
-              // server-to-server and mints your own session.
               QuickAuth.attribution.trackConversion({
                 event: 'login',
                 currency: 'INR',
@@ -136,29 +123,31 @@
               break
 
             case 'OTP_FAILED':
-              // Retry-able: the SDK stays ready for another submitOtp().
               log({ stage: 'wrong code', message: event.message })
               break
 
             case 'ERROR':
-              log({ stage: 'error', code: event.code, message: event.message })
+              log({
+                stage: 'error',
+                code: event.code,
+                message: event.message,
+                retryAfter: event.retryAfter,
+              })
               break
           }
         },
       })
 
+      // Consent is stored, so show the user's earlier choice.
+      $('consent').checked = QuickAuth.consent.get()
       $('consent').addEventListener('change', (e) => {
         QuickAuth.consent.set(e.target.checked)
       })
 
-      // Capture WhatsApp template attribution on page load.
       QuickAuth.attribution.captureLaunch().then((r) => {
         if (r.matched) console.log('[QuickAuth] matched campaign', r)
       })
 
-      // Optional. Auto-read already works through OTP_AUTO_READ above; this
-      // only stamps autocomplete="one-time-code" on the input for iOS
-      // QuickType, and shares the SDK's single WebOTP request.
       QuickAuth.auth.observeOTP({ input: '#code', onCode: () => {} })
 
       $('send').addEventListener('click', async () => {
@@ -169,7 +158,7 @@
             autoSubmit: $('autosubmit').checked,
           })
         } catch (err) {
-          log('Error: ' + (err && err.message ? err.message : err))
+          showInputError(err)
         }
       })
 
@@ -177,17 +166,15 @@
         try {
           await QuickAuth.auth.submitOtp($('code').value.trim())
         } catch (err) {
-          log('Error: ' + (err && err.message ? err.message : err))
+          showInputError(err)
         }
       })
 
-      // No phone number: resendOtp() replays the number, channel and
-      // autoSubmit setting the current attempt already has.
       $('resend').addEventListener('click', async () => {
         try {
           await QuickAuth.auth.resendOtp()
         } catch (err) {
-          log('Error: ' + (err && err.message ? err.message : err))
+          showInputError(err)
         }
       })
     </script>

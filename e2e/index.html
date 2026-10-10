@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QuickAuth Web E2E</title>
+    <style>
+      :root {
+        --bg: #f6f7f9; --card: #fff; --fg: #15171a; --dim: #6b7280; --line: #e3e5e9;
+        --ok: #12804a; --bad: #c62828; --warn: #a15c00; --accent: #2457d6; --code: #0f1115; --codefg: #d6dae0;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #0f1115; --card: #171a20; --fg: #e8eaee; --dim: #8b93a1; --line: #2a2f38;
+          --ok: #3ccf7f; --bad: #ff6b6b; --warn: #f0b04a; --accent: #6d9bff; --code: #0a0c10; --codefg: #c9ced6; }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, sans-serif; }
+      main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: 380px 1fr; }
+      @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+      header { max-width: 1100px; margin: 0 auto; padding: 16px 16px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+      h1 { font-size: 18px; margin: 0 12px 0 0; }
+      h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 0 0 10px; }
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+      .stack { display: grid; gap: 16px; align-content: start; }
+      .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--dim); }
+      .badge.ok { color: var(--ok); border-color: currentColor; } .badge.bad { color: var(--bad); border-color: currentColor; }
+      label { display: block; font-size: 12px; color: var(--dim); margin: 10px 0 4px; }
+      label.check { display: flex; gap: 8px; align-items: center; color: var(--fg); font-size: 13px; margin: 8px 0 0; }
+      input[type=text], input[type=tel], select { width: 100%; padding: 9px 10px; font-size: 15px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+      #code { font-size: 22px; letter-spacing: .3em; text-align: center; font-variant-numeric: tabular-nums; }
+      .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+      .row > * { flex: 1 1 auto; }
+      button { padding: 9px 12px; font-size: 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; min-height: 40px; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:disabled { opacity: .45; cursor: not-allowed; }
+      ul.checklist { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; font-size: 13px; }
+      ul.checklist li::before { content: '○'; display: inline-block; width: 1.4em; color: var(--dim); }
+      ul.checklist li.pass::before { content: '✔'; color: var(--ok); }
+      ul.checklist li.fail::before { content: '✘'; color: var(--bad); }
+      ul.checklist li .note { color: var(--dim); font-size: 12px; margin-left: 4px; word-break: break-all; }
+      #log { background: var(--code); color: var(--codefg); border-radius: 10px; padding: 12px; font: 12px/1.5 ui-monospace, Menlo, monospace; height: calc(100vh - 120px); min-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+      #log .sec { color: #7fb0ff; font-weight: 600; margin-top: 8px; }
+      #log .pass { color: #3ccf7f; } #log .fail { color: #ff6b6b; } #log .skip, #log .warn { color: #f0b04a; }
+      #log .evt { color: #c49bff; } #log .http { color: #8b93a1; } #log .http.err { color: #ff8a8a; }
+      .summary { font-weight: 600; margin-top: 8px; }
+      .muted { color: var(--dim); font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>QuickAuth Web SDK · E2E</h1>
+      <span class="badge" id="b-version">sdk ?</span>
+      <span class="badge" id="b-secure">secure context ?</span>
+      <span class="badge" id="b-webotp">WebOTP ?</span>
+      <span class="badge" id="b-cors">CORS ?</span>
+    </header>
+
+    <main>
+      <div class="stack">
+        <section class="card">
+          <h2>1 · Browser checks</h2>
+          <p class="muted" style="margin:0 0 8px">Runs against this real browser: IIFE global, localStorage, SubtleCrypto, WebOTP, CORS. Sends no SMS.</p>
+          <button class="primary" id="btn-checks" style="width:100%">Run browser checks</button>
+        </section>
+
+        <section class="card">
+          <h2>2 · Live OTP flow</h2>
+          <label for="auth">Auth mode</label>
+          <select id="auth">
+            <option value="pk">publishableKey (recommended — no backend)</option>
+            <option value="token">onTokenExpiry → this server mints a sessionToken</option>
+          </select>
+          <label for="mode">API route</label>
+          <select id="mode">
+            <option value="direct">direct → api.quickauth.in (what customers get)</option>
+            <option value="proxy">proxy → this server → API (bypasses CORS)</option>
+          </select>
+          <label for="phone">Phone (E.164)</label>
+          <input id="phone" type="tel" placeholder="+919876543210" autocomplete="tel" />
+          <label for="channel">Channel</label>
+          <select id="channel">
+            <option value="auto">auto</option>
+            <option value="sms">sms</option>
+            <option value="whatsapp">whatsapp</option>
+          </select>
+          <label class="check"><input type="checkbox" id="autosubmit" /> autoSubmit (verify a WebOTP-read code automatically)</label>
+          <label class="check"><input type="checkbox" id="consent" /> consent (attribution + deviceInfo)</label>
+          <div class="row"><button class="primary" id="btn-send">Send OTP</button></div>
+
+          <label for="code">OTP code</label>
+          <input id="code" type="text" placeholder="······" maxlength="8" />
+          <div class="row">
+            <button class="primary" id="btn-verify" disabled>Verify</button>
+            <button id="btn-wrong" disabled title="submitOtp('000000') — expect OTP_FAILED">Wrong code</button>
+            <button id="btn-resend" disabled>Resend</button>
+          </div>
+          <div class="row">
+            <button id="btn-paste" disabled title="publishAutoReadCode(code) — simulates WebOTP on browsers without it">Simulate auto-read</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>3 · After VERIFIED</h2>
+          <div class="row">
+            <button id="btn-status" disabled>Backend status</button>
+            <button id="btn-attr" disabled>Attribution</button>
+          </div>
+          <div class="row">
+            <button id="btn-onetap" disabled>OneTap re-initiate</button>
+            <button id="btn-reset">Reset (forget device)</button>
+          </div>
+          <p class="muted" id="device-token" style="margin:10px 0 0">device token: —</p>
+        </section>
+
+        <section class="card">
+          <h2>Checklist</h2>
+          <ul class="checklist" id="checklist"></ul>
+          <div class="summary" id="summary"></div>
+        </section>
+      </div>
+
+      <div id="log" aria-live="polite"></div>
+    </main>
+
+    <script src="/dist/index.global.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id)
+      const logEl = $('log')
+      const DEVICE_TOKEN_KEY = 'qa_device_token'
+      let cfg = { apiBase: 'https://api.quickauth.in', defaultPhone: '', publishableKey: '', hasClientSecret: false }
+      let lastRequestId = null
+      let pendingSince = null
+
+      function line(cls, text) {
+        const d = document.createElement('div')
+        if (cls) d.className = cls
+        d.textContent = text
+        logEl.appendChild(d)
+        logEl.scrollTop = logEl.scrollHeight
+      }
+      const section = (t) => line('sec', `━━ ${t}`)
+      const info = (t, tone) => line(tone || '', `   ${t}`)
+
+      function redact(v) {
+        if (!v || typeof v !== 'object') return v
+        const out = Array.isArray(v) ? [] : {}
+        for (const [k, x] of Object.entries(v)) out[k] = /token|secret/i.test(k) && typeof x === 'string' ? `${x.slice(0, 6)}…(${x.length})` : redact(x)
+        return out
+      }
+
+      const CHECKS = [
+        ['iife', 'IIFE global is flat (window.QuickAuth.init)'],
+        ['version', 'QuickAuth.version is semver'],
+        ['storage', 'localStorage persists consent across init()'],
+        ['crypto', 'SubtleCrypto SHA-256 fingerprint'],
+        ['devinfo', 'deviceInfo: none without consent, browser info with consent'],
+        ['observe', 'observeOTP stamps autocomplete="one-time-code"'],
+        ['cors', 'API CORS preflight lets the browser call it directly'],
+        ['token', 'auth: publishableKey sent as X-QuickAuth-Key, or onTokenExpiry → backend mint → sessionToken'],
+        ['sent', 'initiate() → OTP_SENT (or OneTap VERIFIED)'],
+        ['failed', 'wrong code → OTP_FAILED, attempt stays open'],
+        ['resend', 'resendOtp() → OTP_SENT again'],
+        ['autoread', 'OTP_AUTO_READ (WebOTP or simulated)'],
+        ['verified', 'VERIFIED with requestId'],
+        ['devtoken', 'device token stored in localStorage'],
+        ['status', 'backend GET /v1/auth/status confirms'],
+        ['attr', 'attribution launch + conversion accepted'],
+        ['onetap', 'OneTap: re-initiate with device token'],
+      ]
+      const state = {}
+      function renderChecklist() {
+        $('checklist').innerHTML = ''
+        for (const [id, label] of CHECKS) {
+          const li = document.createElement('li')
+          const s = state[id]
+          if (s) li.className = s.status
+          li.textContent = label
+          if (s && s.note) {
+            const n = document.createElement('span')
+            n.className = 'note'
+            n.textContent = `— ${s.note}`
+            li.appendChild(n)
+          }
+          $('checklist').appendChild(li)
+        }
+        const v = Object.values(state)
+        const p = v.filter((x) => x.status === 'pass').length
+        const f = v.filter((x) => x.status === 'fail').length
+        $('summary').textContent = `${p} passed · ${f} failed · ${CHECKS.length - p - f} not run`
+      }
+      function mark(id, status, note) {
+        state[id] = { status, note }
+        renderChecklist()
+        line(status, `  ${status === 'pass' ? '✔' : '✘'} ${CHECKS.find((c) => c[0] === id)[1]}${note ? `  — ${note}` : ''}`)
+      }
+      async function check(id, fn) {
+        try {
+          mark(id, 'pass', (await fn()) || '')
+          return true
+        } catch (e) {
+          mark(id, 'fail', e && e.message ? e.message : String(e))
+          return false
+        }
+      }
+      const assert = (c, m) => { if (!c) throw new Error(m) }
+      const tick = () => new Promise((r) => setTimeout(r, 30))
+
+      async function tappedFetch(input, init = {}) {
+        const t0 = performance.now()
+        const url = String(input)
+        const path = url.replace(/^https?:\/\/[^/]+/, '')
+        try {
+          const res = await fetch(input, init)
+          const ms = Math.round(performance.now() - t0)
+          let body = await res.clone().text()
+          try { body = JSON.parse(body) } catch {}
+          line(res.ok ? 'http' : 'http err', `      → ${init.method || 'GET'} ${path}  ${res.status}  ${ms}ms${res.ok ? '' : '  ' + JSON.stringify(redact(body))}`)
+          return res
+        } catch (err) {
+          line('http err', `      → ${init.method || 'GET'} ${path}  NETWORK/CORS ERROR: ${err.message}`)
+          throw err
+        }
+      }
+
+      function apiBaseUrl() {
+        return $('mode').value === 'proxy' ? `${location.origin}/proxy` : cfg.apiBase
+      }
+
+      function onAuthEvent(ev) {
+        line('evt', `      ⚡ ${JSON.stringify(ev)}`)
+        switch (ev.type) {
+          case 'OTP_SENT':
+            if (pendingSince === 'resend') mark('resend', 'pass', `sessionId=${ev.sessionId}`)
+            else mark('sent', 'pass', `sessionId=${ev.sessionId} expiresIn=${ev.expiresIn}s`)
+            setStage('awaiting')
+            $('code').focus()
+            break
+          case 'OTP_AUTO_READ':
+            $('code').value = ev.code
+            mark('autoread', 'pass', `code=${ev.code}${$('autosubmit').checked ? ' (auto-submitting)' : ''}`)
+            break
+          case 'VERIFIED':
+            lastRequestId = ev.requestId
+            if (pendingSince === 'onetap') mark('onetap', 'pass', `VERIFIED silently, requestId=${ev.requestId}`)
+            else {
+              if (!state.sent) mark('sent', 'pass', 'OneTap — verified without an OTP')
+              mark('verified', 'pass', `requestId=${ev.requestId}`)
+            }
+            setStage('verified')
+            refreshDeviceToken(true)
+            break
+          case 'OTP_FAILED':
+            if (pendingSince === 'wrong') mark('failed', 'pass', ev.message)
+            else info(`rejected: ${ev.message} — try again or resend`, 'warn')
+            break
+          case 'ERROR':
+            info(`ERROR ${ev.code}: ${ev.message}`, 'fail')
+            if (pendingSince === 'resend') mark('resend', 'fail', `${ev.code}: ${ev.message}`)
+            else if (pendingSince === 'send') mark('sent', 'fail', `${ev.code}: ${ev.message}`)
+            break
+        }
+        pendingSince = null
+      }
+
+      let mintCount = 0
+      function initSdk() {
+        if ($('auth').value === 'pk') {
+          if (!cfg.publishableKey) throw new Error('QA_PUBLISHABLE_KEY is not set for e2e/server.js')
+          QuickAuth.init({ apiBaseUrl: apiBaseUrl(), publishableKey: cfg.publishableKey, fetch: tappedFetch, maxRetries: 0, onAuthEvent })
+          mark('token', 'pass', `publishableKey ${cfg.publishableKey.slice(0, 8)}…`)
+          QuickAuth.consent.set($('consent').checked)
+          return
+        }
+        QuickAuth.init({
+          apiBaseUrl: apiBaseUrl(),
+          onTokenExpiry: async () => {
+            const r = await fetch('/api/quickauth-token', { method: 'POST' })
+            const b = await r.json()
+            mintCount++
+            if (!r.ok || !b.sessionToken) {
+              mark('token', 'fail', `HTTP ${r.status} ${JSON.stringify(b)}`)
+              throw new Error(`token mint failed: ${r.status}`)
+            }
+            mark('token', 'pass', `mint #${mintCount}, expiresIn=${b.expiresIn}s`)
+            return b.sessionToken
+          },
+          fetch: tappedFetch,
+          maxRetries: 0,
+          onAuthEvent,
+        })
+        QuickAuth.consent.set($('consent').checked)
+      }
+
+      function setStage(stage) {
+        const awaiting = stage === 'awaiting'
+        $('btn-verify').disabled = !awaiting
+        $('btn-wrong').disabled = !awaiting
+        $('btn-resend').disabled = !(awaiting || stage === 'sent-failed')
+        $('btn-paste').disabled = !awaiting
+        const v = stage === 'verified'
+        $('btn-status').disabled = !v
+        $('btn-attr').disabled = !v
+        $('btn-onetap').disabled = !v
+      }
+
+      function refreshDeviceToken(markIt) {
+        const raw = localStorage.getItem(DEVICE_TOKEN_KEY)
+        $('device-token').textContent = `device token: ${raw ? `stored (${raw.length} chars)` : 'none'}`
+        if (markIt) {
+          if (raw) mark('devtoken', 'pass', `${raw.length} chars`)
+          else mark('devtoken', 'fail', 'server issued no deviceToken (OneTap off for this app?)')
+        }
+      }
+
+      async function guarded(fn) {
+        try { await fn() } catch (err) { info(`threw: ${err.message}`, 'fail') }
+      }
+
+      async function runChecks() {
+        section('Browser checks')
+        const wasConsent = (() => { try { return JSON.parse(localStorage.getItem('qa_consent')) } catch { return null } })()
+
+        await check('iife', () => {
+          assert(typeof window.QuickAuth === 'object' && typeof QuickAuth.init === 'function', 'window.QuickAuth.init missing')
+          assert(!QuickAuth.QuickAuth, 'global is double-nested (window.QuickAuth.QuickAuth) — the 1.1.0 bug')
+          return 'window.QuickAuth.init()'
+        })
+        await check('version', () => {
+          assert(/^\d+\.\d+\.\d+/.test(QuickAuth.version), `got ${QuickAuth.version}`)
+          return `web@${QuickAuth.version}`
+        })
+
+        const stub = async () => new Response(JSON.stringify({ matched: false }), { status: 200 })
+        const fakeTok = 'e30.' + btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 600 })) + '.x'
+        await check('storage', () => {
+          QuickAuth.init({ initialToken: fakeTok, fetch: stub, storagePrefix: 'qa_e2e_' })
+          QuickAuth.consent.set(true)
+          QuickAuth.init({ initialToken: fakeTok, fetch: stub, storagePrefix: 'qa_e2e_' })
+          assert(QuickAuth.consent.get() === true, 'consent did not survive re-init')
+          assert(localStorage.getItem('qa_e2e_consent') === 'true', 'qa_e2e_consent not in localStorage')
+          QuickAuth.consent.set(false)
+          localStorage.removeItem('qa_e2e_consent')
+          return 'qa_e2e_consent round-tripped'
+        })
+        await check('crypto', async () => {
+          assert(crypto && crypto.subtle, 'crypto.subtle unavailable (needs a secure context)')
+          let sent = null
+          const cap = async (url, init) => { sent = JSON.parse(init.body); return stub() }
+          QuickAuth.init({ initialToken: fakeTok, fetch: cap, consent: true, storagePrefix: 'qa_e2e_' })
+          history.replaceState(null, '', '?qa_clid=clid_browser_check')
+          await QuickAuth.attribution.captureLaunch()
+          history.replaceState(null, '', location.pathname)
+          QuickAuth.consent.set(false)
+          assert(sent && /^[0-9a-f]{64}$/.test(sent.fingerprint.hash), 'no 64-hex SHA-256 hash in the launch body')
+          return `${sent.fingerprint.hash.slice(0, 16)}… tz=${sent.fingerprint.hints.timezone}`
+        })
+        QuickAuth.reset()
+        for (const k of Object.keys(localStorage)) if (k.startsWith('qa_e2e_')) localStorage.removeItem(k)
+
+        await check('devinfo', async () => {
+          const bodies = []
+          const cap = async (url, init) => {
+            bodies.push(JSON.parse(init.body))
+            return new Response(JSON.stringify({ state: 'OTP_SENT', sessionId: 's', expiresIn: 60 }), { status: 200 })
+          }
+          QuickAuth.init({ initialToken: fakeTok, fetch: cap, consent: false, storagePrefix: 'qa_e2e_' })
+          await QuickAuth.auth.initiate({ phone: '+919876543210' })
+          QuickAuth.consent.set(true)
+          await QuickAuth.auth.initiate({ phone: '+919876543210' })
+          QuickAuth.reset()
+          for (const k of Object.keys(localStorage)) if (k.startsWith('qa_e2e_')) localStorage.removeItem(k)
+          assert(!('deviceInfo' in bodies[0]), 'deviceInfo sent WITHOUT consent')
+          const d = bodies[1].deviceInfo
+          assert(d && d.platform === 'web' && /^web\//.test(d.sdk), 'deviceInfo missing platform/sdk with consent')
+          info(`deviceInfo ${JSON.stringify({ ...d, userAgent: d.userAgent.slice(0, 40) + '…' })}`)
+          return `${d.browserName ?? '?'} ${d.browserVersion ?? ''} · ${d.osVersion ?? '?'} · mobile=${d.mobile} · tz${d.timeZoneOffsetMinutes >= 0 ? '+' : ''}${d.timeZoneOffsetMinutes}m`
+        })
+
+        await check('observe', () => {
+          const el = document.createElement('input')
+          QuickAuth.init({ initialToken: fakeTok, fetch: stub, storagePrefix: 'qa_e2e_' })
+          const dispose = QuickAuth.auth.observeOTP({ input: el, onCode: () => {} })
+          dispose()
+          QuickAuth.reset()
+          assert(el.getAttribute('autocomplete') === 'one-time-code', 'autocomplete not set')
+          assert(el.getAttribute('inputmode') === 'numeric', 'inputmode not set')
+          return 'autocomplete + inputmode stamped'
+        })
+
+        await check('cors', async () => {
+          try {
+            const r = await fetch(`${cfg.apiBase}/v1/sdk/auth/initiate`, {
+              method: 'POST',
+              // The same header set the SDK sends in the selected auth mode; '{}' has no phone, so no SMS.
+              headers: {
+                'Content-Type': 'application/json',
+                ...($('auth').value === 'pk' ? { 'X-QuickAuth-Key': 'pk_probe' } : { Authorization: 'Bearer probe' }),
+                'Idempotency-Key': 'probe',
+              },
+              body: '{}',
+            })
+            return `preflight ok — probe answered HTTP ${r.status}`
+          } catch (err) {
+            throw new Error(`browser blocked the request (${err.message}). Use "proxy" mode to test the rest; this needs a backend CORS fix.`)
+          }
+        })
+        badge('b-cors', state.cors.status === 'pass', state.cors.status === 'pass' ? 'CORS ok' : 'CORS blocked')
+        if (state.cors.status === 'fail' && $('mode').value === 'direct') {
+          $('mode').value = 'proxy'
+          info('switched API route to proxy so the live flow can run', 'warn')
+        }
+        if (wasConsent !== null) localStorage.setItem('qa_consent', JSON.stringify(wasConsent))
+      }
+
+      $('btn-send').onclick = () => guarded(async () => {
+        const phone = $('phone').value.replace(/[\s-]/g, '')
+        localStorage.setItem('qa_e2e_phone', phone)
+        section(`Live · initiate (${$('auth').value === 'pk' ? 'publishableKey' : 'session token'}, ${$('mode').value}, channel=${$('channel').value}, autoSubmit=${$('autosubmit').checked})`)
+        initSdk()
+        QuickAuth.auth.observeOTP({ input: '#code', onCode: () => {} })
+        pendingSince = 'send'
+        await QuickAuth.auth.initiate({ phone, channel: $('channel').value, autoSubmit: $('autosubmit').checked })
+      })
+
+      $('btn-verify').onclick = () => guarded(async () => {
+        await QuickAuth.auth.submitOtp($('code').value.trim())
+      })
+
+      $('btn-wrong').onclick = () => guarded(async () => {
+        pendingSince = 'wrong'
+        await QuickAuth.auth.submitOtp('000000')
+      })
+
+      $('btn-resend').onclick = () => guarded(async () => {
+        pendingSince = 'resend'
+        await QuickAuth.auth.resendOtp()
+      })
+
+      $('btn-paste').onclick = () => guarded(async () => {
+        const code = $('code').value.trim()
+        if (!/^\d{4,8}$/.test(code)) return info('type the received code first, then simulate', 'warn')
+        QuickAuth.auth.publishAutoReadCode(code)
+      })
+
+      $('btn-status').onclick = () => guarded(async () => {
+        section('Backend · GET /v1/auth/status')
+        const r = await fetch(`/api/auth-status?requestId=${encodeURIComponent(lastRequestId)}`)
+        const b = await r.json()
+        info(JSON.stringify(b))
+        const ok = r.ok && (b.authStatus === 'VERIFIED' || b.verified === true)
+        const who = b.identity ?? b.phone
+        const phone = $('phone').value.replace(/[\s-]/g, '')
+        if (ok && (!who || who === phone)) mark('status', 'pass', `authStatus=${b.authStatus ?? 'VERIFIED'} identity=${who ?? '?'}`)
+        else mark('status', 'fail', `HTTP ${r.status} ${JSON.stringify(b)}`)
+      })
+
+      $('btn-attr').onclick = () => guarded(async () => {
+        section('Attribution (consent on)')
+        QuickAuth.consent.set(true)
+        $('consent').checked = true
+        history.replaceState(null, '', '?qa_clid=clid_live_web_browser')
+        try {
+          const r = await QuickAuth.attribution.captureLaunch()
+          await QuickAuth.attribution.trackConversion({ event: 'e2e_signup', value: 1, metadata: { source: 'web-browser-e2e' } })
+          mark('attr', 'pass', `matched=${r.matched}${r.campaignId ? ` campaign=${r.campaignId}` : ''} (check log for HTTP codes)`)
+        } catch (err) {
+          mark('attr', 'fail', err.message)
+        } finally {
+          history.replaceState(null, '', location.pathname)
+        }
+      })
+
+      $('btn-onetap').onclick = () => guarded(async () => {
+        section('OneTap · re-initiate with stored device token')
+        if (!localStorage.getItem(DEVICE_TOKEN_KEY)) return mark('onetap', 'fail', 'no device token stored')
+        QuickAuth.auth.reset()
+        pendingSince = 'onetap'
+        const phone = $('phone').value.replace(/[\s-]/g, '')
+        await QuickAuth.auth.initiate({ phone, channel: $('channel').value })
+        await tick()
+        if (!state.onetap) mark('onetap', 'pass', 'server sent an OTP instead (OneTap off / token untrusted) — informational')
+      })
+
+      $('btn-reset').onclick = () => {
+        if (QuickAuth.isInitialized) QuickAuth.auth.reset({ forgetDevice: true })
+        else localStorage.removeItem(DEVICE_TOKEN_KEY)
+        $('code').value = ''
+        setStage('idle')
+        refreshDeviceToken(false)
+        info('auth.reset({ forgetDevice: true }) — next initiate() is a fresh device', 'warn')
+      }
+
+      $('consent').onchange = (e) => { if (QuickAuth.isInitialized) QuickAuth.consent.set(e.target.checked) }
+      $('btn-checks').onclick = () => guarded(runChecks)
+
+      function badge(id, ok, text) {
+        $(id).textContent = text
+        $(id).className = `badge ${ok ? 'ok' : 'bad'}`
+      }
+      ;(async () => {
+        renderChecklist()
+        badge('b-version', !!window.QuickAuth, window.QuickAuth ? `web@${QuickAuth.version}` : 'bundle missing')
+        badge('b-secure', window.isSecureContext, window.isSecureContext ? 'secure context' : 'NOT secure context')
+        const webotp = 'OTPCredential' in window
+        badge('b-webotp', webotp, webotp ? 'WebOTP supported' : 'no WebOTP (autocomplete only)')
+        try { cfg = await (await fetch('/api/config')).json() } catch {}
+        $('phone').value = localStorage.getItem('qa_e2e_phone') || cfg.defaultPhone || ''
+        if (!cfg.publishableKey) $('auth').value = 'token'
+        $('btn-status').title = cfg.hasClientSecret === false ? 'needs QA_CLIENT_ID / QA_CLIENT_SECRET on the server' : ''
+        refreshDeviceToken(false)
+        info(`API ${cfg.apiBase} · ${navigator.userAgent}`)
+        info('Run browser checks first, then the live flow.')
+      })()
+    </script>
+  </body>
+</html>

@@ -10,3 +10,9 @@ coverage/
 *.tsbuildinfo
 
 .npmrc
+
+# e2e harness
+e2e/.local-storage.json
+e2e/report-*.json
+
+*.tgz

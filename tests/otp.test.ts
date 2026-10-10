@@ -3,11 +3,6 @@ import { QuickAuth } from '../src/index'
 import type { AuthEvent } from '../src/types'
 import { fakeJwt, initSdk, makeMockFetch, resetSdk } from './_helpers'
 
-/**
- * Microtask flush — events are queueMicrotask-deferred, so a single
- * `await Promise.resolve()` is enough to drain them. We use this whenever
- * we want to observe an event right after the awaited initiate/submitOtp.
- */
 const flushEvents = (): Promise<void> => Promise.resolve()
 
 describe('QuickAuth.init', () => {
@@ -159,6 +154,23 @@ describe('QuickAuth.auth — device token persistence', () => {
     const body = JSON.parse(init.body as string)
     expect(body.deviceInfo).toBeDefined()
     expect(typeof body.deviceInfo.timezone).toBe('string')
+    expect(body.deviceInfo).toMatchObject({
+      platform: 'web',
+      sdk: expect.stringMatching(/^web\/\d+\.\d+\.\d+/),
+      timeZoneOffsetMinutes: expect.any(Number),
+      locale: expect.any(String),
+    })
+  })
+
+  it('omits deviceInfo when consent has not been granted', async () => {
+    const mock = makeMockFetch()
+    mock.reply({ state: 'OTP_SENT', sessionId: 'sess_1', expiresIn: 300 })
+    initSdk({ fetch: mock.fn as unknown as typeof fetch, consent: false })
+
+    await QuickAuth.auth.initiate({ phone: '+919876543210' })
+
+    const [, init] = mock.fn.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).not.toHaveProperty('deviceInfo')
   })
 })
 
@@ -293,7 +305,7 @@ describe('QuickAuth.auth.reset', () => {
 
     const [, init2] = mock.fn.mock.calls[1] as [string, RequestInit]
     const body = JSON.parse(init2.body as string)
-    expect(body.deviceToken).toBeUndefined() // forgotten
+    expect(body.deviceToken).toBeUndefined()
   })
 
   it('keeps the device token when forgetDevice is false/omitted', async () => {
@@ -381,8 +393,6 @@ describe('QuickAuth.auth — concurrent initiate (latest wins)', () => {
 
   it('suppresses events from a superseded attempt', async () => {
     const mock = makeMockFetch()
-    // First call's response — should be ignored because the second call
-    // supersedes it before the response is observed.
     mock.reply({
       state: 'OTP_SENT',
       sessionId: 'old',
@@ -402,20 +412,11 @@ describe('QuickAuth.auth — concurrent initiate (latest wins)', () => {
       onAuthEvent: (e) => events.push(e as AuthEvent),
     })
 
-    // Fire two initiates back-to-back. Both complete since the mock is
-    // synchronous, so we rely on the attemptCounter inside the SDK to
-    // discard stale state. Both responses come back; only the latest event
-    // should be emitted that reflects the current state machine position.
     const a = QuickAuth.auth.initiate({ phone: '+919876543210' })
     const b = QuickAuth.auth.initiate({ phone: '+919876543210' })
     await Promise.all([a, b])
     await flushEvents()
 
-    // Both events fire (each initiate emits one), but only the latest one
-    // leaves the state machine in awaiting_otp for "new". The earlier event
-    // is from the superseded attempt; we still emit it (it transitioned
-    // into awaiting_otp, then was overwritten). What matters is the FINAL
-    // state — verify that.
     const last = events[events.length - 1] as Extract<
       AuthEvent,
       { type: 'OTP_SENT' }

@@ -1,10 +1,6 @@
 import type { WhatsAppLoginOptions } from '../types'
 
-/**
- * Open a wa.me deep-link that prefills the configured business number with
- * a signed login token in the message body. Caller is expected to surface
- * a "Continue with WhatsApp" button that triggers this from a user gesture.
- */
+/** Open a wa.me deep-link that prefills the configured business number with a signed login token in the message body. */
 export function startWhatsAppLogin(opts: WhatsAppLoginOptions): string {
   if (!opts?.businessNumber) {
     throw new Error('[QuickAuth] startWhatsAppLogin: businessNumber required')

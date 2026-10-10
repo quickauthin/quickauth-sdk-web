@@ -1,10 +1,8 @@
-import { SDK_CLIENT_HEADER } from '../version'
 import { getConfig } from './config'
+import { httpError } from './errors'
+import { fetchWithTimeout } from './http'
+import { logger } from './logger'
 
-/**
- * Minimum seconds remaining before we trigger a refresh of the cached token.
- * Refreshing at 30s before expiry gives the network plenty of headroom.
- */
 const REFRESH_BUFFER_MS = 30_000
 
 interface CachedToken {
@@ -15,11 +13,6 @@ interface CachedToken {
 let cached: CachedToken | null = null
 let inflight: Promise<string> | null = null
 
-/**
- * Decode the `exp` claim from a JWT (no signature verification — that's the
- * server's job). Returns the expiry as a Unix-ms timestamp, or null if the
- * token is malformed / lacks an exp claim.
- */
 export function decodeJwtExp(token: string): number | null {
   if (!token || typeof token !== 'string') return null
   const parts = token.split('.')
@@ -43,7 +36,6 @@ export function decodeJwtExp(token: string): number | null {
 
 function rememberToken(token: string): void {
   const expMs = decodeJwtExp(token)
-  // If we can't read an exp claim, default to 10 minutes from now.
   const expiresAtMs = expMs ?? Date.now() + 10 * 60 * 1000
   cached = { token, expiresAtMs }
 }
@@ -53,32 +45,29 @@ function isFresh(entry: CachedToken | null): entry is CachedToken {
   return entry.expiresAtMs - Date.now() > REFRESH_BUFFER_MS
 }
 
-/**
- * Mint a sessionToken via the customer-supplied `unsafe` credentials. This
- * is the ESCAPE HATCH path — strongly discouraged for browser apps.
- */
 async function mintViaUnsafe(): Promise<string> {
   const cfg = getConfig()
   if (!cfg.unsafe?.directClientId || !cfg.unsafe.directClientSecret) {
     throw new Error('[QuickAuth] unsafe credentials missing')
   }
-  const res = await cfg.fetchImpl(`${cfg.apiBaseUrl}/v1/sdk/session`, {
+  const { res, text } = await fetchWithTimeout(cfg, `${cfg.apiBaseUrl}/v1/sdk/session`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Client-Id': cfg.unsafe.directClientId,
       'X-Client-Secret': cfg.unsafe.directClientSecret,
-      'X-QA-SDK': SDK_CLIENT_HEADER,
     },
     body: JSON.stringify({}),
   })
-  if (!res.ok) {
-    throw new Error(
-      `[QuickAuth] /v1/sdk/session failed with ${res.status}`,
-    )
+  let body: unknown = text
+  try {
+    body = text ? JSON.parse(text) : {}
+  } catch {
+    // ignore
   }
-  const body = (await res.json()) as { sessionToken?: string; token?: string }
-  const token = body.sessionToken ?? body.token
+  if (!res.ok) throw httpError(res, body)
+  const b = (body && typeof body === 'object' ? body : {}) as { sessionToken?: string; token?: string }
+  const token = b.sessionToken ?? b.token
   if (!token) {
     throw new Error('[QuickAuth] /v1/sdk/session response missing sessionToken')
   }
@@ -97,19 +86,16 @@ async function refresh(): Promise<string> {
   if (cfg.unsafe) {
     return mintViaUnsafe()
   }
+  if (cfg.publishableKey) {
+    throw new Error('[QuickAuth] no session token in publishableKey mode')
+  }
   throw new Error(
     '[QuickAuth] no onTokenExpiry callback or unsafe credentials configured',
   )
 }
 
-/**
- * Returns a fresh sessionToken, refreshing through the configured callback
- * (or unsafe-mode mint) if cached token is missing / expiring soon.
- *
- * Single-flight: concurrent callers share a single in-flight refresh.
- */
+/** Returns a fresh sessionToken, refreshing through the configured callback (or unsafe-mode mint) if cached token is missing / expiring soon. */
 export async function getToken(): Promise<string> {
-  // Lazily seed cache from initialToken on first call.
   if (!cached) {
     const cfg = getConfig()
     if (cfg.initialToken) {
@@ -125,8 +111,10 @@ export async function getToken(): Promise<string> {
 
   inflight = (async () => {
     try {
+      logger.debug(`refreshing session token via ${getConfig().onTokenExpiry ? 'onTokenExpiry' : 'unsafe credentials'}`)
       const token = await refresh()
       rememberToken(token)
+      logger.debug(`session token ready, expires in ${Math.round((cached!.expiresAtMs - Date.now()) / 1000)}s`)
       return token
     } finally {
       inflight = null
@@ -136,12 +124,11 @@ export async function getToken(): Promise<string> {
   return inflight
 }
 
-/** Drop the cached token. The next `getToken()` call will refresh. */
+/** Drop the cached token. */
 export function invalidate(): void {
   cached = null
 }
 
-/** Test-only — drops both cache and in-flight refresh. */
 export function __resetTokenManager(): void {
   cached = null
   inflight = null

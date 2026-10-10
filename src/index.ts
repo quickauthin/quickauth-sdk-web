@@ -1,37 +1,3 @@
-/**
- * @quickauthin/web — headless phone auth + WhatsApp marketing attribution.
- *
- *   import { QuickAuth } from '@quickauthin/web'
- *
- *   QuickAuth.init({
- *     onTokenExpiry: async () =>
- *       (await fetch('/api/quickauth-token').then(r => r.json())).sessionToken,
- *     onAuthEvent: (event) => {
- *       switch (event.type) {
- *         case 'OTP_SENT':   showOtpInput(); break
- *         case 'OTP_AUTO_READ': prefillInput(event.code); break
- *         case 'VERIFIED':   finishLogin(event.requestId); break
- *         case 'OTP_FAILED': showError(event.message); break
- *         case 'ERROR':      showError(event.message); break
- *       }
- *     },
- *   })
- *
- *   await QuickAuth.auth.initiate({ phone: '+919876543210', autoSubmit: true })
- *   // OTP_SENT arrives; on Chrome/Android the code is auto-read and — because
- *   // autoSubmit is on — verified without the user pressing anything.
- *   await QuickAuth.auth.submitOtp('123456')   // manual entry path
- *   await QuickAuth.auth.resendOtp()           // same number, same channel
- *
- *   // On user-initiated sign-out:
- *   QuickAuth.auth.reset({ forgetDevice: true })
- *
- * The `onTokenExpiry` callback must return a fresh `sessionToken` (a
- * short-lived JWT minted by your backend via `POST /v1/sdk/session` with
- * your `X-Client-Id` + `X-Client-Secret`). The SDK auto-refreshes the
- * token ~30s before it expires, so the callback is invoked rarely.
- */
-
 import {
   initiate,
   publishAutoReadCode,
@@ -44,10 +10,13 @@ import { observeOTP } from './auth/webotp'
 import {
   captureLaunch,
   clearAttribution,
+  flushPendingLaunch,
+  getQaClid,
   getStoredAttribution,
+  hasPendingLaunch,
 } from './attribution/capture'
 import { trackConversion } from './attribution/track'
-import { clearQueue, flushQueue, QuickAuthError } from './core/client'
+import { clearQueue, flushQueue, queueLength, QuickAuthError } from './core/client'
 import {
   configure,
   getConfig,
@@ -57,6 +26,7 @@ import {
 } from './core/config'
 import { consent as consentStore } from './core/consent'
 import { setAuthEventHandler } from './core/events'
+import { logger } from './core/logger'
 import { storage } from './core/storage'
 import { tokenManager, __resetTokenManager } from './core/token'
 import type { InitOptions } from './types'
@@ -66,12 +36,14 @@ export type {
   AttributionResult,
   AuthEvent,
   AuthEventHandler,
+  BrowserSignals,
   DeviceInfo,
   FingerprintEnvelope,
   InitiateOptions,
   InitOptions,
   ObserveOTPOptions,
   OTPChannel,
+  QuickAuthErrorCode,
   ResetOptions,
   TrackConversionOptions,
   WhatsAppLoginOptions,
@@ -80,20 +52,28 @@ export type { ResolvedConfig } from './core/config'
 
 export { QuickAuthError }
 
+function flushPending(): Promise<void> {
+  return Promise.all([flushQueue(), flushPendingLaunch()]).then(
+    () => undefined,
+    (err) => logger.debug('flushing queued requests failed:', err),
+  )
+}
+
 const consent = {
   get: (): boolean => consentStore.get(),
-  set: (value: boolean): void => {
+  /** Record the user's choice; granting sends anything queued, revoking drops it. */
+  set: (value: boolean): Promise<void> => {
     const previous = consentStore.get()
     consentStore.set(value)
     if (!value && previous) {
       clearQueue()
       clearAttribution()
     }
-    if (value && !previous) {
-      void flushQueue()
-    }
+    return value && !previous ? flushPending() : Promise.resolve()
   },
   onChange: consentStore.onChange,
+  /** Requests waiting for consent. */
+  pendingCount: (): number => queueLength() + (hasPendingLaunch() ? 1 : 0),
 }
 
 const auth = {
@@ -110,28 +90,40 @@ const attribution = {
   captureLaunch,
   trackConversion,
   getStored: getStoredAttribution,
+  qaClid: getQaClid,
 }
 
-/**
- * Direct WhatsApp deep-link helper. Most apps should prefer
- * `QuickAuth.auth.startWhatsAppLogin(...)`, which is the same call named for
- * the flow it belongs to.
- */
+/** Direct WhatsApp deep-link helper. */
 const whatsapp = {
   open: startWhatsAppLogin,
 }
 
 export const QuickAuth = {
-  /** Semver of this build. Single-sourced from package.json — see src/version.ts. */
+  /** Semver of this build. */
   version: SDK_VERSION,
 
-  init(options: InitOptions): void {
-    configure(options)
+  /** Configure the SDK. Throws on invalid options; the promise settles once queued requests are sent. */
+  init(options: InitOptions): Promise<void> {
+    const cfg = configure(options)
     __resetTokenManager()
     consentStore.hydrate(options.consent)
-    if (consentStore.get()) {
-      void flushQueue()
-    }
+    logger.debug(
+      `init web@${SDK_VERSION}`,
+      {
+        apiBaseUrl: cfg.apiBaseUrl,
+        auth: cfg.publishableKey
+          ? 'publishableKey'
+          : cfg.onTokenExpiry
+            ? 'onTokenExpiry'
+            : cfg.unsafe
+              ? 'unsafe'
+              : 'initialToken',
+        consent: consentStore.get(),
+        maxRetries: cfg.maxRetries,
+        requestTimeoutMs: cfg.requestTimeoutMs,
+      },
+    )
+    return consentStore.get() ? flushPending() : Promise.resolve()
   },
 
   /** Whether {@link init} has run. */
@@ -139,22 +131,15 @@ export const QuickAuth = {
     return isConfigured()
   },
 
-  /** The resolved active configuration. Throws when {@link init} has not run. */
+  /** The resolved active configuration. */
   get config(): ResolvedConfig {
     return getConfig()
   },
 
-  /**
-   * Token cache — `getToken()` / `invalidate()`. Exposed for advanced flows
-   * (forcing a refresh after your backend rotates credentials) and tests.
-   */
+  /** Token cache — `getToken()` / `invalidate()`. */
   tokenManager,
 
-  /**
-   * Replace the auth event handler after init — useful when the handler
-   * belongs to a component that mounts later than your `init()` call. Pass
-   * null to detach.
-   */
+  /** Replace the auth event handler after init — useful when the handler belongs to a component that mounts later than your `init()` call. */
   setAuthEventHandler,
 
   consent,
@@ -162,15 +147,7 @@ export const QuickAuth = {
   attribution,
   whatsapp,
 
-  /**
-   * Tear the SDK back down to its pre-`init()` state: auth state machine
-   * reset, WebOTP disarmed, token cache dropped, event handler detached,
-   * configuration cleared. `init()` must be called again afterwards.
-   *
-   * This is the whole-SDK reset. To end a login attempt while staying
-   * initialised — the common case, including sign-out — use
-   * `QuickAuth.auth.reset({ forgetDevice: true })`.
-   */
+  /** Tear the SDK back down to its pre-`init()` state: auth state machine reset, WebOTP disarmed, token cache dropped, event handler detached, configuration cleared. */
   reset(): void {
     resetAuth()
     setAuthEventHandler(null)
@@ -178,7 +155,7 @@ export const QuickAuth = {
     __resetConfig()
   },
 
-  /** Error class thrown for non-2xx API responses. Reachable from the script-tag build. */
+  /** Error class thrown for non-2xx API responses. */
   QuickAuthError,
 
   /** @deprecated Use {@link QuickAuth.isInitialized}. */

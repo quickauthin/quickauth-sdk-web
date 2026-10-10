@@ -84,9 +84,12 @@ describe('attribution.trackConversion', () => {
     expect(mock.fn).toHaveBeenCalledTimes(2)
     const [, init] = mock.fn.mock.calls[1] as [string, RequestInit]
     const payload = JSON.parse(init.body as string)
-    expect(payload.event).toBe('signup')
-    expect(payload.qa_clid).toBe('track-me')
-    expect(payload.campaignId).toBe('cmp_1')
-    expect(payload.metadata).toEqual({ plan: 'free' })
+    expect(payload).toEqual({
+      event: 'signup',
+      value: 0,
+      currency: 'INR',
+      qa_clid: 'track-me',
+      metadata: { plan: 'free' },
+    })
   })
 })

@@ -1,8 +1,3 @@
-/**
- * Tiny localStorage wrapper that no-ops when storage is unavailable
- * (Safari private mode, SSR, locked-down embeds).
- */
-
 let prefix = 'qa_'
 
 const memory = new Map<string, string>()
@@ -25,8 +20,13 @@ export const storage = {
   },
   get<T = unknown>(key: string): T | null {
     const k = prefix + key
-    const s = safeStorage()
-    const raw = s ? s.getItem(k) : memory.get(k) ?? null
+    let raw: string | null = null
+    try {
+      raw = safeStorage()?.getItem(k) ?? null
+    } catch {
+      raw = null
+    }
+    if (raw == null) raw = memory.get(k) ?? null
     if (raw == null) return null
     try {
       return JSON.parse(raw) as T
@@ -36,31 +36,49 @@ export const storage = {
   },
   set(key: string, value: unknown): void {
     const k = prefix + key
-    const raw = JSON.stringify(value)
+    let raw: string
+    try {
+      raw = JSON.stringify(value)
+    } catch {
+      return
+    }
     const s = safeStorage()
-    if (s) s.setItem(k, raw)
-    else memory.set(k, raw)
+    try {
+      if (s) {
+        s.setItem(k, raw)
+        memory.delete(k)
+        return
+      }
+    } catch {
+      // ignore
+    }
+    memory.set(k, raw)
   },
   remove(key: string): void {
     const k = prefix + key
-    const s = safeStorage()
-    if (s) s.removeItem(k)
-    else memory.delete(k)
+    memory.delete(k)
+    try {
+      safeStorage()?.removeItem(k)
+    } catch {
+      // ignore
+    }
   },
-  /** Remove every prefixed key. Used when consent is revoked. */
+  /** Remove every prefixed key. */
   purge(): void {
-    const s = safeStorage()
-    if (s) {
+    for (const k of Array.from(memory.keys())) {
+      if (k.startsWith(prefix)) memory.delete(k)
+    }
+    try {
+      const st = safeStorage()
+      if (!st) return
       const toRemove: string[] = []
-      for (let i = 0; i < s.length; i++) {
-        const key = s.key(i)
+      for (let i = 0; i < st.length; i++) {
+        const key = st.key(i)
         if (key && key.startsWith(prefix)) toRemove.push(key)
       }
-      toRemove.forEach((k) => s.removeItem(k))
-    } else {
-      for (const k of Array.from(memory.keys())) {
-        if (k.startsWith(prefix)) memory.delete(k)
-      }
+      toRemove.forEach((key) => st.removeItem(key))
+    } catch {
+      // ignore
     }
   },
 }

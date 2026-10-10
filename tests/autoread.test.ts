@@ -61,7 +61,6 @@ describe('auto-read — initiate() arms WebOTP itself', () => {
     web.requests[0]!.deliver('123456')
     await flush()
 
-    // Only the /initiate call — nothing was verified on the user's behalf.
     expect(mock.fn).toHaveBeenCalledTimes(1)
   })
 
@@ -103,32 +102,40 @@ describe('auto-read — initiate() arms WebOTP itself', () => {
     web.requests[0]!.deliver('123456')
     await flush()
 
-    // The WhatsApp copy of the same message lands after the SMS one. Verifying
-    // it would hit a code the server has already consumed, and the user would
-    // see a failure arrive after they were logged in.
     QuickAuth.auth.publishAutoReadCode('123456')
     await flush()
 
-    expect(mock.fn).toHaveBeenCalledTimes(2) // initiate + one verify
+    expect(mock.fn).toHaveBeenCalledTimes(2)
   })
 
-  it('re-arms on the next attempt — a WebOTP request is spent once it resolves', async () => {
+  it('keeps the pending WebOTP request across attempts (resend) instead of abort-and-reissue', async () => {
     const mock = makeMockFetch()
     mock.reply(OTP_SENT)
     mock.reply({ ...OTP_SENT, sessionId: 'sess_2' })
     initSdk({ fetch: mock.fn as unknown as typeof fetch, consent: false })
 
     await QuickAuth.auth.initiate({ phone: '+919876543210' })
+    await QuickAuth.auth.resendOtp()
+
+    expect(web.requests).toHaveLength(1)
+    expect(web.requests[0]!.aborted).toBe(false)
+  })
+
+  it('re-arms once the previous request has resolved', async () => {
+    const mock = makeMockFetch()
+    mock.reply(OTP_SENT)
+    mock.reply({ ...OTP_SENT, sessionId: 'sess_2' })
+    initSdk({ fetch: mock.fn as unknown as typeof fetch, consent: false })
+
+    await QuickAuth.auth.initiate({ phone: '+919876543210' })
+    web.requests[0]!.deliver('111111')
+    await flush()
     await QuickAuth.auth.initiate({ phone: '+919876543210' })
 
     expect(web.requests).toHaveLength(2)
-    // The superseded attempt's request was torn down, so the browser is never
-    // holding two live OTP requests at once.
-    expect(web.requests[0]!.aborted).toBe(true)
-    expect(web.live()).toHaveLength(1)
   })
 
-  it('drops a code that belongs to a superseded attempt', async () => {
+  it('a code read after a new attempt starts goes to the new attempt only', async () => {
     const mock = makeMockFetch()
     mock.reply(OTP_SENT)
     mock.reply({ ...OTP_SENT, sessionId: 'sess_2' })
@@ -141,10 +148,10 @@ describe('auto-read — initiate() arms WebOTP itself', () => {
 
     await QuickAuth.auth.initiate({ phone: '+919876543210' })
     await QuickAuth.auth.initiate({ phone: '+919876543210' })
-    web.requests[0]!.deliver('111111') // late code from attempt #1
+    web.requests[0]!.deliver('111111')
     await flush()
 
-    expect(events.map((e) => e.type)).toEqual(['OTP_SENT', 'OTP_SENT'])
+    expect(events.map((e) => e.type)).toEqual(['OTP_SENT', 'OTP_SENT', 'OTP_AUTO_READ'])
   })
 
   it('tears auto-read down on reset', async () => {
@@ -173,8 +180,6 @@ describe('auto-read — initiate() arms WebOTP itself', () => {
 
     await QuickAuth.auth.initiate({ phone: '+919876543210' })
 
-    // OneTap fired — no code is coming, so the browser must not be left
-    // showing "use the code from SMS" over an already-signed-in user.
     expect(web.requests[0]!.aborted).toBe(true)
   })
 })
@@ -222,9 +227,31 @@ describe('auto-read — observeOTP alongside the state machine', () => {
     await QuickAuth.auth.initiate({ phone: '+919876543210' })
     QuickAuth.auth.observeOTP({ onCode: vi.fn() })
 
-    // Re-arming is fine; two LIVE requests are not — the browser cancels one
-    // of them and that consumer never hears a code.
     expect(web.live()).toHaveLength(1)
+  })
+
+  it('re-subscribing observeOTP (e.g. a React effect re-run) keeps the pending request', async () => {
+    const mock = makeMockFetch()
+    mock.reply(OTP_SENT)
+    const events: AuthEvent[] = []
+    initSdk({
+      fetch: mock.fn as unknown as typeof fetch,
+      consent: false,
+      onAuthEvent: (e) => events.push(e as AuthEvent),
+    })
+
+    const first = QuickAuth.auth.observeOTP({ onCode: vi.fn() })
+    await QuickAuth.auth.initiate({ phone: '+919876543210' })
+    first()
+    const onCode = vi.fn()
+    QuickAuth.auth.observeOTP({ onCode })
+
+    expect(web.requests).toHaveLength(1)
+    expect(web.requests[0]!.aborted).toBe(false)
+    web.requests[0]!.deliver('333333')
+    await flush()
+    expect(onCode).toHaveBeenCalledWith('333333')
+    expect(events.map((e) => e.type)).toEqual(['OTP_SENT', 'OTP_AUTO_READ'])
   })
 
   it('disposing an observeOTP subscription leaves the login flow armed', async () => {

@@ -108,7 +108,7 @@ describe('QuickAuth.auth.resendOtp — auto-read', () => {
   })
   afterEach(() => web.restore())
 
-  it('carries autoSubmit forward and re-arms a fresh request', async () => {
+  it('carries autoSubmit forward and keeps the pending WebOTP request', async () => {
     const mock = makeMockFetch()
     mock.reply(sent('sess_1'))
     mock.reply(sent('sess_2'))
@@ -123,14 +123,12 @@ describe('QuickAuth.auth.resendOtp — auto-read', () => {
     await QuickAuth.auth.initiate({ phone: '+919876543210', autoSubmit: true })
     await QuickAuth.auth.resendOtp()
 
-    expect(web.requests).toHaveLength(2)
-    expect(web.requests[0]!.aborted).toBe(true)
+    expect(web.requests).toHaveLength(1)
+    expect(web.requests[0]!.aborted).toBe(false)
 
     web.live()[0]!.deliver('123456')
     await flush()
 
-    // Third call is the verify — autoSubmit survived the resend, and the
-    // latch was re-armed for the new attempt.
     expect(mock.fn).toHaveBeenCalledTimes(3)
     const [url, init] = mock.fn.mock.calls[2] as [string, RequestInit]
     expect(url).toBe('https://api.test.local/v1/sdk/auth/verify')

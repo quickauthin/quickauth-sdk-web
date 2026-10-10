@@ -65,7 +65,6 @@ describe('observeOTP', () => {
     const onCode = vi.fn()
     observeOTP({ onCode, input })
 
-    // Wait a few microtasks so the credentials.get promise resolves.
     await new Promise((r) => setTimeout(r, 5))
 
     expect(get).toHaveBeenCalledTimes(1)
